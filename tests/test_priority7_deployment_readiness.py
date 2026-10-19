@@ -99,9 +99,22 @@ def test_public_routes_do_not_expose_stack_traces(client):
     assert b"ADMIN_PASSWORD" not in resp.data
 
 
+def test_healthcheck_reveals_no_otps_or_secrets(client):
+    """
+    Test 6: Verify that ordinary health endpoints (/health, /healthz)
+    reveal no OTP codes, passwords, or secrets.
+    """
+    for endpoint in ["/health", "/healthz"]:
+        resp = client.get(endpoint)
+        assert resp.status_code == 200
+        raw_text = resp.data.decode("utf-8").lower()
+        for forbidden in ["otp", "code", "password", "secret", "token"]:
+            assert forbidden not in raw_text, f"{endpoint} leaked '{forbidden}': {raw_text}"
+
+
 def test_production_gateway_blocks_unauthenticated_public_visitors(client, monkeypatch):
     """
-    Test 6: In production (APP_ENV=production), unauthenticated public visitors
+    Test 7: In production (APP_ENV=production), unauthenticated public visitors
     must NOT be able to view the SMS console or harvest citizen OTPs via the API.
     Must return HTTP 403 Forbidden.
     """
@@ -117,46 +130,95 @@ def test_production_gateway_blocks_unauthenticated_public_visitors(client, monke
     assert resp_api.status_code == 403, "Public access to SMS messages API must be blocked in production"
 
 
-def test_production_gateway_permits_admin_session(client, monkeypatch):
+def test_production_gateway_blocks_admin_session_and_admin_password(client, monkeypatch):
     """
-    Test 7: In production, an authenticated administrator session must be permitted
-    to view the diagnostic console and read delivered OTPs.
+    Test 8: In production, administrative sessions and ADMIN_PASSWORD credentials
+    must NOT be allowed to access citizen OTPs or the telecom SMS gateway.
+    Separation of duties requires that admin credentials cannot harvest OTPs.
     """
     import app as app_module
     monkeypatch.setattr(app_module, "APP_ENV", "production")
+    monkeypatch.setattr(app_module, "ADMIN_PASSWORD", "super-secret-admin-pass-999")
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
 
+    # 1. Admin login session attempting to access console or messages API
     with client.session_transaction() as sess:
         sess["logged_in"] = True
         sess["admin"] = True
 
     resp_console = client.get("/__gateway/")
-    assert resp_console.status_code == 200
-    assert b"PurvSMS Gateway Console" in resp_console.data
+    assert resp_console.status_code == 403, "Admin session must NOT bypass gateway access control in production"
 
     resp_api = client.get("/__gateway/api/messages")
-    assert resp_api.status_code == 200
+    assert resp_api.status_code == 403, "Admin session must NOT read citizen OTPs in production"
+
+    # 2. Presenting ADMIN_PASSWORD in X-Gateway-Auth or Bearer header must be rejected
+    resp_admin_hdr = client.get(
+        "/__gateway/api/messages",
+        headers={"X-Gateway-Auth": "super-secret-admin-pass-999"}
+    )
+    assert resp_admin_hdr.status_code == 403, "ADMIN_PASSWORD must NOT be accepted as gateway auth token"
+
+    resp_admin_bearer = client.get(
+        "/__gateway/api/messages",
+        headers={"Authorization": "Bearer super-secret-admin-pass-999"}
+    )
+    assert resp_admin_bearer.status_code == 403, "ADMIN_PASSWORD must NOT be accepted via Bearer header"
 
 
-def test_production_gateway_permits_auth_header(client, monkeypatch):
+def test_production_gateway_blocks_missing_or_invalid_tokens(client, monkeypatch):
     """
-    Test 8: In production, an automated probe or script presenting the correct
-    X-Gateway-Auth or Bearer token header must be permitted to read messages.
+    Test 9: In production, requests without a token or with an invalid token
+    must be rejected with HTTP 403 Forbidden.
     """
     import app as app_module
     monkeypatch.setattr(app_module, "APP_ENV", "production")
-    monkeypatch.setattr(app_module, "ADMIN_PASSWORD", "test-eval-token-98765")
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "strong-dedicated-gateway-secret-54321")
 
-    # Valid header
-    resp_ok = client.get(
-        "/__gateway/api/messages",
-        headers={"X-Gateway-Auth": "test-eval-token-98765"}
-    )
-    assert resp_ok.status_code == 200
+    # Missing token
+    resp_none = client.get("/__gateway/api/messages")
+    assert resp_none.status_code == 403
 
-    # Invalid header
+    # Invalid header token
     resp_bad = client.get(
         "/__gateway/api/messages",
-        headers={"X-Gateway-Auth": "wrong-token"}
+        headers={"X-Gateway-Auth": "invalid-token-123"}
     )
     assert resp_bad.status_code == 403
+
+    # Invalid query token
+    resp_bad_q = client.get("/__gateway/?token=wrong-token")
+    assert resp_bad_q.status_code == 403
+
+
+def test_production_gateway_permits_only_dedicated_gateway_auth_token(client, monkeypatch):
+    """
+    Test 10: In production, access is granted ONLY when the dedicated strong
+    GATEWAY_AUTH_TOKEN environment secret is presented via X-Gateway-Auth,
+    Authorization Bearer header, or query parameter.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "strong-dedicated-gateway-secret-54321")
+
+    # Valid X-Gateway-Auth header
+    resp_hdr = client.get(
+        "/__gateway/api/messages",
+        headers={"X-Gateway-Auth": "strong-dedicated-gateway-secret-54321"}
+    )
+    assert resp_hdr.status_code == 200
+    assert "messages" in resp_hdr.get_json()
+
+    # Valid Authorization Bearer header
+    resp_bearer = client.get(
+        "/__gateway/api/messages",
+        headers={"Authorization": "Bearer strong-dedicated-gateway-secret-54321"}
+    )
+    assert resp_bearer.status_code == 200
+
+    # Valid query param for console
+    resp_console = client.get("/__gateway/?token=strong-dedicated-gateway-secret-54321")
+    assert resp_console.status_code == 200
+    assert b"PurvSMS Gateway Console" in resp_console.data
+
 
