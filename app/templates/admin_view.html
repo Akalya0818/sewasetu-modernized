@@ -20,10 +20,12 @@
 {% if a[11] == 'PENDING' %}
 <p>
 <form method="post" action="/admin/approve/{{ app_id }}" style="display:inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button class="btn" type="submit">Approve</button>
 </form>
 &nbsp;
 <form method="post" action="/admin/reject/{{ app_id }}" style="display:inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button class="btn" style="background:#a33" type="submit">Reject</button>
 </form>
 </p>

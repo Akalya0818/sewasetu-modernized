@@ -12,6 +12,8 @@ import io
 import csv
 import random
 import hashlib
+import secrets
+import hmac
 import configparser
 from datetime import datetime, date, timedelta
 
@@ -29,6 +31,23 @@ config.read(os.path.join(BASE_DIR, "config", "app.ini"))
 app = Flask(__name__)
 app.secret_key = config.get("app", "secret_key")
 app.config["PERMANENT_SESSION_LIFETIME"] = 300
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = config.get("app", "session_cookie_samesite", fallback="Lax")
+app.config["SESSION_COOKIE_SECURE"] = config.getboolean("app", "session_cookie_secure", fallback=False)
+
+def generate_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+app.jinja_env.globals["csrf_token"] = generate_csrf_token
+
+def validate_csrf():
+    submitted_token = request.form.get("csrf_token") or request.headers.get("X-CSRFToken")
+    session_token = session.get("csrf_token")
+    if not submitted_token or not session_token or not hmac.compare_digest(str(session_token), str(submitted_token)):
+        return False
+    return True
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "sewasetu@123"
@@ -624,6 +643,8 @@ def admin_view(app_id):
 def admin_approve(app_id):
     if not session.get("admin"):
         abort(403)
+    if not validate_csrf():
+        abort(403)
     conn = get_db()
     try:
         cur = conn.cursor()
@@ -640,6 +661,8 @@ def admin_approve(app_id):
 @app.route("/admin/reject/<int:app_id>", methods=["POST"])
 def admin_reject(app_id):
     if not session.get("admin"):
+        abort(403)
+    if not validate_csrf():
         abort(403)
     conn = get_db()
     try:
