@@ -128,9 +128,10 @@ pytest tests/test_priority3_performance_and_dos.py -v     # Priority 3: PDF conc
 pytest tests/test_priority4_security_and_privacy.py -v    # Priority 4: Auth, IDOR, CSRF & SQLi
 pytest tests/test_priority5_unicode_and_names.py -v       # Priority 5: Unicode & Indic font preservation
 pytest tests/test_priority6_environment_and_secrets.py -v # Security: Environment secrets & startup validation
+pytest tests/test_priority7_deployment_readiness.py -v    # Deployment: Healthcheck, DATABASE_URL & SMS gateway
 ```
 
-**Test Suite Status**: **64 passed, 0 failed, 0 skipped** across all 6 test files.
+**Test Suite Status**: **69 passed, 0 failed, 0 skipped** across all 7 test files.
 
 ---
 
@@ -146,7 +147,8 @@ All modifications follow a strict test-first progression: each priority includes
 | **Priority 4** | **Citizen Data Privacy & Security**: Enforced applicant record ownership on `/ack/<id>.pdf` and `/application/<id>` (closing public PII harvest and IDOR); restricted admin actions with CSRF protection; parameterized `/status/reset` SQL queries; hardened session cookies (`HttpOnly`, `SameSite=Lax`). | `tests/test_priority4_security_and_privacy.py` | `10fa583`, `d29b10b` | `e6a102c`, `ea5531c` |
 | **Priority 5** | **Unicode & Indic-Name Preservation**: Replaced 20-byte UTF-8 slicing with Unicode character sanitization (`VARCHAR(100)`); configured TrueType Indic font resolution (`Nirmala.ttc` / `NotoSansBengali`); eliminated `?` replacement on acknowledgment PDFs. | `tests/test_priority5_unicode_and_names.py` | `580c286` | `1c0062f` |
 | **Security Hardening** | **DOB Password Reset Blocking**: Safely blocked unauthenticated date-of-birth password reset on `/status/reset` with in-person advisory notice. | `tests/test_priority4_security_and_privacy.py` | `e0e2373` | `8243911` |
-| **Secrets & Infra** | **Environment Secrets & Docker Health**: Removed hardcoded passwords from tracked files; enforced startup failure on missing production secrets; added `.env.example`, synthetic seed mount, `pg_isready` healthcheck, and Indic fonts in Docker. | `tests/test_priority6_environment_and_secrets.py` | `399cdfd` | *Current* |
+| **Secrets & Infra** | **Environment Secrets & Docker Health**: Removed hardcoded passwords from tracked files; enforced startup failure on missing production secrets; added `.env.example`, synthetic seed mount, `pg_isready` healthcheck, and Indic fonts in Docker. | `tests/test_priority6_environment_and_secrets.py` | `399cdfd` | `83051d0` |
+| **Deployment Readiness** | **Cloud Deployment & Resiliency**: Added `/health` probe endpoints, `DATABASE_URL` managed Postgres support, dynamic `PORT` binding, embedded SMS gateway fallback, and Render blueprint (`render.yaml`). | `tests/test_priority7_deployment_readiness.py` | `f075139` | `194cd2c` |
 
 ---
 
@@ -227,5 +229,5 @@ On branch master
 nothing to commit, working tree clean
 
 $ pytest -v
-======================= 64 passed, 61 warnings in 7.98s =======================
+======================= 69 passed, 61 warnings in 18.35s =======================
 ```
