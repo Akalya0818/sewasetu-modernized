@@ -306,15 +306,16 @@ def test_c3_unauthenticated_user_cannot_approve_or_reject(client, sample_applica
 
 def test_c4_verified_admin_can_approve_application(client, test_db, sample_applications):
     """
-    Test C.4: Verified administrator can approve applications and record audit trail.
+    Test C.4: Verified administrator can approve applications with valid CSRF token and record audit trail.
     """
     id_a = sample_applications["citizen_a"]["id"]
 
     with client.session_transaction() as sess:
         sess["logged_in"] = True
         sess["admin"] = True
+        sess["csrf_token"] = "valid_test_admin_csrf_token"
 
-    resp = client.post(f"/admin/approve/{id_a}", follow_redirects=False)
+    resp = client.post(f"/admin/approve/{id_a}", data={"csrf_token": "valid_test_admin_csrf_token"}, follow_redirects=False)
     assert resp.status_code == 302
 
     cur = test_db.cursor()
@@ -327,15 +328,16 @@ def test_c4_verified_admin_can_approve_application(client, test_db, sample_appli
 
 def test_c5_verified_admin_can_reject_application(client, test_db, sample_applications):
     """
-    Test C.5: Verified administrator can reject applications and record audit trail.
+    Test C.5: Verified administrator can reject applications with valid CSRF token and record audit trail.
     """
     id_b = sample_applications["citizen_b"]["id"]
 
     with client.session_transaction() as sess:
         sess["logged_in"] = True
         sess["admin"] = True
+        sess["csrf_token"] = "valid_test_admin_csrf_token"
 
-    resp = client.post(f"/admin/reject/{id_b}", follow_redirects=False)
+    resp = client.post(f"/admin/reject/{id_b}", data={"csrf_token": "valid_test_admin_csrf_token"}, follow_redirects=False)
     assert resp.status_code == 302
 
     cur = test_db.cursor()
@@ -344,6 +346,70 @@ def test_c5_verified_admin_can_reject_application(client, test_db, sample_applic
     assert row[0] == "REJECTED"
     assert row[1] is not None
     assert row[2] == "admin"
+
+
+def test_c6_admin_approve_missing_csrf_token_denied(client, test_db, sample_applications):
+    """
+    Test C.6: Admin approve request missing CSRF token must be denied (403) and must NOT change status.
+    """
+    id_a = sample_applications["citizen_a"]["id"]
+
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+        sess["admin"] = True
+        sess["csrf_token"] = "valid_test_admin_csrf_token"
+
+    # POST without csrf_token
+    resp = client.post(f"/admin/approve/{id_a}", data={}, follow_redirects=False)
+    assert resp.status_code == 403, f"Expected 403 Forbidden for missing CSRF token, got {resp.status_code}"
+
+    cur = test_db.cursor()
+    cur.execute("SELECT status, decided_at, decided_by FROM applications WHERE id = %s", (id_a,))
+    row = cur.fetchone()
+    assert row[0] == "PENDING", f"Application status must remain PENDING, got {row[0]}"
+    assert row[1] is None, "decided_at must remain NULL"
+
+
+def test_c7_admin_approve_invalid_csrf_token_denied(client, test_db, sample_applications):
+    """
+    Test C.7: Admin approve request with forged/invalid CSRF token must be denied (403).
+    """
+    id_a = sample_applications["citizen_a"]["id"]
+
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+        sess["admin"] = True
+        sess["csrf_token"] = "legitimate_session_token"
+
+    # POST with attacker forged token
+    resp = client.post(f"/admin/approve/{id_a}", data={"csrf_token": "forged_attacker_token"}, follow_redirects=False)
+    assert resp.status_code == 403, f"Expected 403 Forbidden for invalid CSRF token, got {resp.status_code}"
+
+    cur = test_db.cursor()
+    cur.execute("SELECT status FROM applications WHERE id = %s", (id_a,))
+    assert cur.fetchone()[0] == "PENDING"
+
+
+def test_c8_admin_reject_missing_or_invalid_csrf_token_denied(client, test_db, sample_applications):
+    """
+    Test C.8: Admin reject request with missing or invalid CSRF token must be denied (403).
+    """
+    id_b = sample_applications["citizen_b"]["id"]
+
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+        sess["admin"] = True
+        sess["csrf_token"] = "legitimate_session_token"
+
+    resp1 = client.post(f"/admin/reject/{id_b}", data={}, follow_redirects=False)
+    assert resp1.status_code == 403
+
+    resp2 = client.post(f"/admin/reject/{id_b}", data={"csrf_token": "wrong_token"}, follow_redirects=False)
+    assert resp2.status_code == 403
+
+    cur = test_db.cursor()
+    cur.execute("SELECT status FROM applications WHERE id = %s", (id_b,))
+    assert cur.fetchone()[0] == "PENDING"
 
 
 # ---------------------------------------------------------------------------
@@ -426,3 +492,20 @@ def test_e1_form_parameters_cannot_grant_admin_session(client, sample_applicatio
     })
     with client.session_transaction() as sess:
         assert sess.get("admin") is not True, "Citizen session must not gain admin privileges via form parameters"
+
+
+def test_e2_session_cookie_security_and_samesite_policy(client):
+    """
+    Test E.2: Verify session cookies are configured with HttpOnly=True,
+    SameSite=Lax, and proper conditional Secure configuration.
+    """
+    assert flask_app.config.get("SESSION_COOKIE_HTTPONLY") is True, "Session cookie must be HttpOnly"
+    assert flask_app.config.get("SESSION_COOKIE_SAMESITE") in ("Lax", "Strict"), "Session cookie SameSite must be set"
+    # Verify local dev allows non-secure over HTTP (False by default in development)
+    assert flask_app.config.get("SESSION_COOKIE_SECURE") is False, "Default local development must not force Secure"
+
+    # Make request to generate session cookie
+    resp = client.post("/status", data={"mobile": "9800000401", "password": "wrong"})
+    set_cookie = resp.headers.get("Set-Cookie", "")
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=Lax" in set_cookie
