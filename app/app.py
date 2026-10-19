@@ -310,44 +310,58 @@ def handle_submission():
         return redirect(url_for("index"))
 
     conn = get_db()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM applications WHERE mobile = %s", (mobile,))
+        if cur.fetchone()[0] > 0:
+            flash("An application already exists for this mobile number. "
+                  "Duplicate applications are not permitted.")
+            return redirect(url_for("index"))
 
-    cur.execute("SELECT count(*) FROM applications WHERE mobile = %s", (mobile,))
-    if cur.fetchone()[0] > 0:
-        cur.close(); conn.close()
-        flash("An application already exists for this mobile number. "
-              "Duplicate applications are not permitted.")
-        return redirect(url_for("index"))
+        app_no = new_application_no()
+        cur.execute(
+            """INSERT INTO applications
+               (application_no, applicant_name, mobile, dob, gender, marital_status,
+                husband_name, husband_employer, village, block, bank_account, ifsc,
+                doc_path, status, submitted_at)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s)
+               RETURNING id""",
+            (app_no, name, mobile, dob, gender, marital, husband_name,
+             husband_employer, village, block, bank_account, ifsc, doc_path,
+             datetime.now()))
+        new_id = cur.fetchone()[0]
 
-    app_no = new_application_no()
-    cur.execute(
-        """INSERT INTO applications
-           (application_no, applicant_name, mobile, dob, gender, marital_status,
-            husband_name, husband_employer, village, block, bank_account, ifsc,
-            doc_path, status, submitted_at)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'PENDING',%s)
-           RETURNING id""",
-        (app_no, name, mobile, dob, gender, marital, husband_name,
-         husband_employer, village, block, bank_account, ifsc, doc_path,
-         datetime.now()))
-    new_id = cur.fetchone()[0]
+        # status portal account; password is DOB as DDMMYYYY per dept. circular
+        portal_pass = dob.strftime("%d%m%Y")
+        cur.execute("SELECT count(*) FROM portal_users WHERE mobile = %s", (mobile,))
+        if cur.fetchone()[0] == 0:
+            cur.execute("INSERT INTO portal_users (mobile, password_hash) VALUES (%s,%s)",
+                        (mobile, hash_password(portal_pass)))
+        conn.commit()
 
-    # status portal account; password is DOB as DDMMYYYY per dept. circular
-    portal_pass = dob.strftime("%d%m%Y")
-    cur.execute("SELECT count(*) FROM portal_users WHERE mobile = %s", (mobile,))
-    if cur.fetchone()[0] == 0:
-        cur.execute("INSERT INTO portal_users (mobile, password_hash) VALUES (%s,%s)",
-                    (mobile, hash_password(portal_pass)))
-    conn.commit()
+        # Fetch acknowledgment row while transaction is active
+        cur.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
+                    "bank_account, ifsc, submitted_at, status FROM applications WHERE id = %s",
+                    (new_id,))
+        ack_row = cur.fetchone()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
+    # Database connection is now released before expensive PDF generation and file I/O
     app.logger.info("generating acknowledgment pdf application=%d" % new_id)
-    pdf_bytes = generate_acknowledgment(cur, new_id)
+    pdf_bytes = generate_acknowledgment(ack_row)
     ack_dir = os.path.join(UPLOAD_DIR, "ack")
     os.makedirs(ack_dir, exist_ok=True)
-    with open(os.path.join(ack_dir, "%d.pdf" % new_id), "wb") as out:
+    temp_pdf_path = os.path.join(ack_dir, "%d.pdf.tmp" % new_id)
+    final_pdf_path = os.path.join(ack_dir, "%d.pdf" % new_id)
+    with open(temp_pdf_path, "wb") as out:
         out.write(pdf_bytes)
+    os.replace(temp_pdf_path, final_pdf_path)
 
-    cur.close(); conn.close()
     session.pop("form_data", None)
     session.pop("doc_path", None)
     session.pop("verified_mobile", None)
@@ -356,11 +370,34 @@ def handle_submission():
     return render_template("confirmation.html", app_no=app_no, app_id=new_id)
 
 
-def generate_acknowledgment(cur, app_id):
-    cur.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
-                "bank_account, ifsc, submitted_at, status FROM applications WHERE id = %s",
-                (app_id,))
-    row = cur.fetchone()
+def generate_acknowledgment(cur_or_row=None, app_id=None):
+    # Support multiple caller conventions:
+    # 1. generate_acknowledgment(ack_row)
+    # 2. generate_acknowledgment(cur, app_id)
+    # 3. generate_acknowledgment(app_id)
+    if cur_or_row is not None and app_id is None and isinstance(cur_or_row, (tuple, list)):
+        row = cur_or_row
+    elif cur_or_row is not None and hasattr(cur_or_row, 'execute'):
+        cur_or_row.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
+                           "bank_account, ifsc, submitted_at, status FROM applications WHERE id = %s",
+                           (app_id,))
+        row = cur_or_row.fetchone()
+    else:
+        target_id = app_id if app_id is not None else cur_or_row
+        conn = get_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
+                        "bank_account, ifsc, submitted_at, status FROM applications WHERE id = %s",
+                        (target_id,))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+
+    if not row:
+        raise ValueError("Application record not found for acknowledgment generation")
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 14)
@@ -369,11 +406,9 @@ def generate_acknowledgment(cur, app_id):
     pdf.cell(0, 8, "Department of Social Welfare", ln=1, align="C")
     pdf.cell(0, 8, "Old Age Pension Scheme - Acknowledgment", ln=1, align="C")
     pdf.ln(4)
-    # decorative border, as per approved letterhead design
-    for i in range(0, 2000):
-        x = 10 + (i % 190)
-        pdf.line(x, 282, x + 0.5, 282)
-        pdf.line(x, 12, x + 0.5, 12)
+    # Decorative letterhead border: header rule at y=12, footer rule at y=282
+    pdf.line(10, 12, 200, 12)
+    pdf.line(10, 282, 200, 282)
     labels = ["Application No", "Applicant Name", "Mobile", "Date of Birth",
               "Village", "Block", "Bank Account", "IFSC", "Submitted At", "Status"]
     pdf.set_font("Helvetica", "", 10)
@@ -443,13 +478,15 @@ def ack_pdf(app_id):
     path = os.path.join(UPLOAD_DIR, "ack", "%d.pdf" % app_id)
     if not os.path.exists(path):
         conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM applications WHERE id = %s", (app_id,))
-        if not cur.fetchone():
-            cur.close(); conn.close()
-            abort(404)
-        data = generate_acknowledgment(cur, app_id)
-        cur.close(); conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM applications WHERE id = %s", (app_id,))
+            if not cur.fetchone():
+                abort(404)
+        finally:
+            cur.close()
+            conn.close()
+        data = generate_acknowledgment(app_id=app_id)
         return send_file(io.BytesIO(data), mimetype="application/pdf")
     return send_file(path, mimetype="application/pdf")
 

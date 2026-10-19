@@ -291,10 +291,11 @@ def test_d2_file_write_failure_does_not_corrupt_database(client, test_db, monkey
     If writing the PDF to disk fails (e.g. disk full), database connection must still
     be released cleanly and no half-written file is left behind.
     """
+    orig_open = open
     def failing_open(path, mode='r', *args, **kwargs):
-        if 'wb' in mode and path.endswith('.pdf'):
+        if 'wb' in mode and (str(path).endswith('.pdf') or '.tmp' in str(path)):
             raise OSError(28, "No space left on device")
-        return open(path, mode, *args, **kwargs)
+        return orig_open(path, mode, *args, **kwargs)
 
     with client.session_transaction() as sess:
         sess['form_data'] = {
