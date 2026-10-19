@@ -236,9 +236,32 @@ def about():
     return render_template("about.html")
 
 
+def is_gateway_authorized():
+    # In non-production environments (development/testing), simulation console is open
+    if APP_ENV != "production":
+        return True
+    # In production, require administrator session
+    if session.get("admin") is True:
+        return True
+    # Or an evaluation / automated probe token passed via X-Gateway-Auth or Authorization Bearer header
+    auth_header = request.headers.get("X-Gateway-Auth") or ""
+    if not auth_header and request.headers.get("Authorization"):
+        parts = request.headers.get("Authorization").split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            auth_header = parts[1]
+
+    expected_token = os.environ.get("GATEWAY_AUTH_TOKEN") or ADMIN_PASSWORD
+    if expected_token and auth_header and auth_header == expected_token:
+        return True
+    return False
+
+
 @app.route("/__gateway/", defaults={"subpath": ""}, methods=["GET", "POST"])
 @app.route("/__gateway/<path:subpath>", methods=["GET", "POST"])
 def gateway_proxy(subpath):
+    if not is_gateway_authorized():
+        abort(403)
+
     # Proxy to external SMS gateway if reachable
     if SMS_GATEWAY_URL and SMS_GATEWAY_URL.startswith("http"):
         try:
