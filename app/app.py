@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+ # -*- coding: utf-8 -*-
 """
 Sewa Setu - Old Age Pension Portal
 Government of Purvanchal, Department of Social Welfare
@@ -240,18 +240,25 @@ def is_gateway_authorized():
     # In non-production environments (development/testing), simulation console is open
     if APP_ENV != "production":
         return True
-    # In production, require administrator session
-    if session.get("admin") is True:
-        return True
-    # Or an evaluation / automated probe token passed via X-Gateway-Auth or Authorization Bearer header
-    auth_header = request.headers.get("X-Gateway-Auth") or ""
-    if not auth_header and request.headers.get("Authorization"):
+
+    # In production: separation of duties.
+    # Administrative logins and ADMIN_PASSWORD credentials MUST NOT be used to harvest OTPs.
+    # Access is strictly restricted to an independent dedicated GATEWAY_AUTH_TOKEN environment secret.
+    gateway_secret = os.environ.get("GATEWAY_AUTH_TOKEN")
+    if not gateway_secret or not gateway_secret.strip():
+        # If no dedicated gateway token is configured in production, the console and API are disabled
+        return False
+
+    auth_token = request.headers.get("X-Gateway-Auth") or ""
+    if not auth_token and request.headers.get("Authorization"):
         parts = request.headers.get("Authorization").split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
-            auth_header = parts[1]
+            auth_token = parts[1]
 
-    expected_token = os.environ.get("GATEWAY_AUTH_TOKEN") or ADMIN_PASSWORD
-    if expected_token and auth_header and auth_header == expected_token:
+    if not auth_token:
+        auth_token = request.args.get("token") or ""
+
+    if auth_token and hmac.compare_digest(auth_token.strip(), gateway_secret.strip()):
         return True
     return False
 

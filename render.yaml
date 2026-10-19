@@ -36,6 +36,8 @@ services:
           property: connectionString
       - key: SESSION_COOKIE_SECURE
         value: "true"
+      - key: GATEWAY_AUTH_TOKEN
+        generateValue: true
 
 databases:
   - name: sewasetu-db
