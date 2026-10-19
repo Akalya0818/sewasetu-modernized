@@ -53,7 +53,7 @@ def load_config(base_dir=None):
 
     # Strictly validate required sections and required settings
     required = {
-        "database": ["host", "port", "name", "user", "password"],
+        "database": ["host", "port", "name", "user"],
         "pension": ["sla_days", "min_age", "scheme_deadline"],
         "app": ["sms_gateway_url"],
     }
@@ -63,6 +63,24 @@ def load_config(base_dir=None):
         for key in keys:
             if not cfg.has_option(sec, key) or cfg.get(sec, key).strip() == "":
                 raise ValueError(f"Invalid configuration: missing required setting '{key}' in [{sec}]")
+
+    # Database password validation
+    app_env = os.environ.get("APP_ENV", "development").lower()
+    db_pass = (
+        os.environ.get("DB_PASSWORD")
+        or os.environ.get("POSTGRES_PASSWORD")
+        or (cfg.has_option("database", "password") and cfg.get("database", "password").strip())
+    )
+    insecure_db_passwords = ("sewasetu123", "dev-db-password-change-in-production")
+    if app_env == "production":
+        if not db_pass or db_pass in insecure_db_passwords:
+            raise ValueError(
+                "FATAL [Production Security]: Database password is missing or using an insecure default. "
+                "Set DB_PASSWORD or POSTGRES_PASSWORD environment variable."
+            )
+    else:
+        if not db_pass:
+            cfg.set("database", "password", "dev-db-password-change-in-production")
 
     # Strictly validate integer and timestamp formats
     try:
@@ -99,13 +117,19 @@ except Exception:
 
 
 def get_db_connection(cfg):
-    """Establishes database connection using configuration settings."""
+    """Establishes database connection using configuration settings and environment variables."""
+    db_pass = (
+        os.environ.get("DB_PASSWORD")
+        or os.environ.get("POSTGRES_PASSWORD")
+        or (cfg.has_option("database", "password") and cfg.get("database", "password").strip())
+        or "dev-db-password-change-in-production"
+    )
     return psycopg2.connect(
         host=os.environ.get("DB_HOST", cfg.get("database", "host")),
         port=int(os.environ.get("DB_PORT", cfg.get("database", "port"))),
         dbname=os.environ.get("DB_NAME", cfg.get("database", "name")),
         user=os.environ.get("DB_USER", cfg.get("database", "user")),
-        password=os.environ.get("DB_PASSWORD", cfg.get("database", "password")),
+        password=db_pass,
     )
 
 

@@ -29,7 +29,66 @@ config = configparser.ConfigParser()
 config.read(os.path.join(BASE_DIR, "config", "app.ini"))
 
 app = Flask(__name__)
-app.secret_key = config.get("app", "secret_key")
+
+APP_ENV = os.environ.get("APP_ENV", "development").lower()
+
+# Secret Key resolution
+secret_key_env = os.environ.get("SECRET_KEY") or os.environ.get("FLASK_SECRET_KEY")
+secret_key_ini = config.get("app", "secret_key", fallback="").strip()
+SECRET_KEY = secret_key_env or secret_key_ini
+
+# Admin credentials resolution
+admin_user_env = os.environ.get("ADMIN_USERNAME")
+ADMIN_USERNAME = admin_user_env or "admin"
+
+admin_pass_env = os.environ.get("ADMIN_PASSWORD")
+ADMIN_PASSWORD = admin_pass_env
+
+# Database password resolution
+db_pass_env = os.environ.get("DB_PASSWORD") or os.environ.get("POSTGRES_PASSWORD")
+db_pass_ini = config.get("database", "password", fallback="").strip()
+DB_PASSWORD = db_pass_env or db_pass_ini
+
+# Startup security validation:
+INSECURE_SECRETS = (
+    "ssp-prod-key-2023-donotshare",
+    "dev-insecure-flask-secret-key-change-in-production",
+)
+INSECURE_ADMIN_PASSWORDS = (
+    "sewasetu@123",
+    "dev-admin-password-change-in-production",
+)
+INSECURE_DB_PASSWORDS = (
+    "sewasetu123",
+    "dev-db-password-change-in-production",
+)
+
+if APP_ENV == "production":
+    if not SECRET_KEY or SECRET_KEY in INSECURE_SECRETS:
+        raise RuntimeError(
+            "FATAL [Production Security]: SECRET_KEY environment variable is missing, empty, "
+            "or set to an insecure default. A cryptographically secure secret key is required in production."
+        )
+    if not ADMIN_PASSWORD or ADMIN_PASSWORD in INSECURE_ADMIN_PASSWORDS:
+        raise RuntimeError(
+            "FATAL [Production Security]: ADMIN_PASSWORD environment variable is missing, empty, "
+            "or set to an insecure default. A strong administrator password is required in production."
+        )
+    if not DB_PASSWORD or DB_PASSWORD in INSECURE_DB_PASSWORDS:
+        raise RuntimeError(
+            "FATAL [Production Security]: DB_PASSWORD (or POSTGRES_PASSWORD) environment variable is missing, "
+            "empty, or set to an insecure default. A strong database password is required in production."
+        )
+else:
+    # Development / Testing fallback
+    if not SECRET_KEY:
+        SECRET_KEY = "dev-insecure-flask-secret-key-change-in-production"
+    if not ADMIN_PASSWORD:
+        ADMIN_PASSWORD = "dev-admin-password-change-in-production"
+    if not DB_PASSWORD:
+        DB_PASSWORD = "dev-db-password-change-in-production"
+
+app.secret_key = SECRET_KEY
 app.config["PERMANENT_SESSION_LIFETIME"] = 300
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = config.get("app", "session_cookie_samesite", fallback="Lax")
@@ -48,9 +107,6 @@ def validate_csrf():
     if not submitted_token or not session_token or not hmac.compare_digest(str(session_token), str(submitted_token)):
         return False
     return True
-
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "sewasetu@123"
 
 SMS_GATEWAY_URL = config.get("app", "sms_gateway_url")
 OTP_VALIDITY_SECONDS = config.getint("app", "otp_validity_seconds")
@@ -76,11 +132,11 @@ except Exception:
 
 def get_db():
     return psycopg2.connect(
-        host=config.get("database", "host"),
-        port=config.get("database", "port"),
-        dbname=config.get("database", "name"),
-        user=config.get("database", "user"),
-        password=config.get("database", "password"),
+        host=os.environ.get("DB_HOST", config.get("database", "host")),
+        port=int(os.environ.get("DB_PORT", config.get("database", "port"))),
+        dbname=os.environ.get("DB_NAME", config.get("database", "name")),
+        user=os.environ.get("DB_USER", config.get("database", "user")),
+        password=DB_PASSWORD,
     )
 
 
@@ -593,12 +649,16 @@ def reset_password():
 @app.route("/admin", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
-        if (request.form.get("username") == ADMIN_USERNAME and
-                request.form.get("password") == ADMIN_PASSWORD):
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if (username == ADMIN_USERNAME and
+                hmac.compare_digest(str(password), str(ADMIN_PASSWORD))):
             session["logged_in"] = True
             session["admin"] = True
+            session["admin_user"] = ADMIN_USERNAME
             return redirect(url_for("admin_dashboard"))
         flash("Invalid credentials.")
+        return render_template("admin_login.html"), 401
     return render_template("admin_login.html")
 
 

@@ -2,7 +2,7 @@
 
 > **Handover Documentation & Engineering Reference**  
 > **Target System:** Government of Purvanchal, Department of Social Welfare  
-> **Status:** Legacy Remediation Complete (Priorities 1–5). **NOT PRODUCTION-READY** due to unresolved upstream authentication architecture (see Section 6).
+> **Status:** Legacy Remediation Complete (Priorities 1–5 & Security Hardening). **NOT PRODUCTION-READY** due to unresolved upstream authentication architecture (see Section 7).
 
 ---
 
@@ -16,8 +16,10 @@ Following vendor disengagement on January 31, 2026, the application suffered fro
 - Month-end database connection exhaustion caused by blocking PDF generation
 - Critical data privacy leaks (public acknowledgment harvesting, dossier IDOR, admin CSRF)
 - Unicode truncation and corruption of Assamese, Bengali, and Devanagari citizen names
+- Hardcoded administrative credentials, database passwords, and session secrets
+- Production database seed dependency in container configuration
 
-This repository contains the stabilized, tested, and hardened codebase with **57 regression tests passing (100%)**.
+This repository contains the stabilized, tested, and hardened codebase with **64 regression tests passing (100%)**.
 
 ---
 
@@ -26,9 +28,10 @@ This repository contains the stabilized, tested, and hardened codebase with **57
 - **Backend Framework**: Python 3.11+ / Flask 2.2.5
 - **WSGI Server**: Gunicorn 20.1.0 (4 worker processes, 30s timeout)
 - **Database**: PostgreSQL 15 (`sewasetu` database with tables `applications`, `portal_users`, `otps`)
-- **PDF Engine**: `fpdf2` 2.7.4 with Unicode TrueType font support
+- **PDF Engine**: `fpdf2` 2.7.4 with Unicode TrueType font support (`fonts-noto-core`, `fonts-indic`)
 - **Simulated Telecom Gateway**: Mock SMS gateway at port 8025 (`/__gateway/`) for OTP delivery
 - **Batch Processing**: Nightly statutory deemed approval cron script (`app/scripts/deemed_approval.py`)
+- **Container Infrastructure**: Docker Compose with `pg_isready` healthcheck and synthetic seed initialization
 
 ---
 
@@ -63,16 +66,19 @@ pypdf>=5.0.0
 
 ### Option A: Running with Docker Compose (Recommended)
 
-1. Build and launch all services:
+1. Copy the environment template:
+   ```bash
+   cp .env.example .env
+   ```
+2. Build and launch all services:
    ```bash
    docker compose up --build
    ```
-2. Access the services:
+   *Note: PostgreSQL service automatically runs health checks (`pg_isready`), initializes the schema (`app/schema.sql`), and populates safe synthetic test records (`seed/synthetic_seed.sql`). Dependent services wait for database readiness before starting.*
+3. Access the services:
    - **Citizen Portal**: `http://localhost:8000`
    - **Administrative Portal**: `http://localhost:8000/admin`
    - **Simulated SMS Gateway Console**: `http://localhost:8000/__gateway/`
-3. Database initialization:
-   PostgreSQL automatically seeds `app/schema.sql` and `seed/seed.sql` on first initialization.
 
 ### Option B: Native Local Development
 
@@ -86,14 +92,17 @@ pypdf>=5.0.0
    pip install -r app/requirements.txt
    pip install pytest pypdf
    ```
-3. Configure `app/config/app.ini` with your local database credentials:
-   ```ini
-   [database]
-   host = localhost
-   port = 5432
-   name = sewasetu
-   user = postgres
-   password = your_password
+3. Configure environment variables (or copy `.env.example` to `.env`):
+   ```bash
+   export APP_ENV=development
+   export SECRET_KEY=dev-insecure-flask-secret-key-change-in-production
+   export ADMIN_USERNAME=admin
+   export ADMIN_PASSWORD=dev-admin-password-change-in-production
+   export DB_HOST=localhost
+   export DB_PORT=5432
+   export DB_NAME=sewasetu
+   export DB_USER=sewasetu
+   export DB_PASSWORD=dev-db-password-change-in-production
    ```
 4. Run the Flask application:
    ```bash
@@ -113,14 +122,15 @@ pytest -v
 
 To run individual priority suites:
 ```bash
-pytest tests/test_priority1_forms_and_journey.py -v   # Priority 1: Form usability & uploads
-pytest tests/test_priority2_deemed_approval.py -v     # Priority 2: Deemed approvals & eligibility
-pytest tests/test_priority3_performance_and_dos.py -v # Priority 3: PDF concurrency & DB leaks
-pytest tests/test_priority4_security_and_privacy.py -v# Priority 4: Auth, IDOR, CSRF & SQLi
-pytest tests/test_priority5_unicode_and_names.py -v   # Priority 5: Unicode & Indic font preservation
+pytest tests/test_priority1_forms_and_journey.py -v       # Priority 1: Form usability & uploads
+pytest tests/test_priority2_deemed_approval.py -v         # Priority 2: Deemed approvals & eligibility
+pytest tests/test_priority3_performance_and_dos.py -v     # Priority 3: PDF concurrency & DB leaks
+pytest tests/test_priority4_security_and_privacy.py -v    # Priority 4: Auth, IDOR, CSRF & SQLi
+pytest tests/test_priority5_unicode_and_names.py -v       # Priority 5: Unicode & Indic font preservation
+pytest tests/test_priority6_environment_and_secrets.py -v # Security: Environment secrets & startup validation
 ```
 
-**Test Suite Status**: **57 passed, 0 failed, 0 skipped** across all 5 test files.
+**Test Suite Status**: **64 passed, 0 failed, 0 skipped** across all 6 test files.
 
 ---
 
@@ -135,6 +145,8 @@ All modifications follow a strict test-first progression: each priority includes
 | **Priority 3** | **Month-End Concurrency & Performance**: Released database connections in `finally` before PDF file I/O; removed decorative 4,000-line vector loop; reduced PDF latency by **8.5x** (12.14 ms $\rightarrow$ 1.42 ms) and file size by **70%**. | `tests/test_priority3_performance_and_dos.py` | `a996ef9` | `a0131fb` |
 | **Priority 4** | **Citizen Data Privacy & Security**: Enforced applicant record ownership on `/ack/<id>.pdf` and `/application/<id>` (closing public PII harvest and IDOR); restricted admin actions with CSRF protection; parameterized `/status/reset` SQL queries; hardened session cookies (`HttpOnly`, `SameSite=Lax`). | `tests/test_priority4_security_and_privacy.py` | `10fa583`, `d29b10b` | `e6a102c`, `ea5531c` |
 | **Priority 5** | **Unicode & Indic-Name Preservation**: Replaced 20-byte UTF-8 slicing with Unicode character sanitization (`VARCHAR(100)`); configured TrueType Indic font resolution (`Nirmala.ttc` / `NotoSansBengali`); eliminated `?` replacement on acknowledgment PDFs. | `tests/test_priority5_unicode_and_names.py` | `580c286` | `1c0062f` |
+| **Security Hardening** | **DOB Password Reset Blocking**: Safely blocked unauthenticated date-of-birth password reset on `/status/reset` with in-person advisory notice. | `tests/test_priority4_security_and_privacy.py` | `e0e2373` | `8243911` |
+| **Secrets & Infra** | **Environment Secrets & Docker Health**: Removed hardcoded passwords from tracked files; enforced startup failure on missing production secrets; added `.env.example`, synthetic seed mount, `pg_isready` healthcheck, and Indic fonts in Docker. | `tests/test_priority6_environment_and_secrets.py` | `399cdfd` | *Current* |
 
 ---
 
@@ -144,7 +156,7 @@ All modifications follow a strict test-first progression: each priority includes
 > **CRITICAL ARCHITECTURAL VULNERABILITY**: The application **MUST NOT be deployed to production** or exposed to public traffic in its current state.
 
 ### Vulnerability Analysis
-While the SQL injection vulnerability on `/status/reset` was eliminated in Priority 4 via query parameterization (`SELECT mobile FROM portal_users WHERE mobile = %s`), the underlying authentication design remains inherently flawed:
+While the SQL injection vulnerability on `/status/reset` was eliminated in Priority 4 via query parameterization, the underlying authentication design remains inherently flawed:
 
 1. **Deterministic Password Overwrite**:
    - The route resets portal passwords to the applicant's date of birth in `DDMMYYYY` format (`newpass = dob_val.strftime("%d%m%Y")`).
@@ -171,27 +183,19 @@ Before deploying this application to a production server or cloud virtual machin
 
 ### A. Transport Security & Session Cookies
 - **HTTPS Termination**: Deploy behind a TLS-terminating reverse proxy (Nginx, Caddy, or AWS ALB) with HSTS enabled.
-- **Secure Cookie Flag**: In production `config/app.ini`, update:
-  ```ini
-  [app]
-  session_cookie_secure = true
-  session_cookie_samesite = Lax
-  ```
+- **Secure Cookie Flag**: In production, set `session_cookie_secure = true` and `session_cookie_samesite = Lax` in `config/app.ini`.
 
 ### B. Secrets & Configuration Management
-- **Secret Key**: Replace `secret_key = ssp-prod-key-2023-donotshare` in `config/app.ini` with a cryptographically random 64-character secret generated via `python -c "import secrets; print(secrets.token_hex(32))"`.
-- **Admin Credentials**: Remove hardcoded `ADMIN_USERNAME` and `ADMIN_PASSWORD` from source code and load them from environment variables or a secrets manager.
-- **Database Credentials**: Use a dedicated, least-privilege PostgreSQL database user.
+- **Production Mode Enforcement**: Set `APP_ENV=production`. Missing or default secrets will abort process startup immediately.
+- **Secret Key**: Supply a cryptographically random 64-character secret via `SECRET_KEY` environment variable.
+- **Admin Credentials**: Supply strong credentials via `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables.
+- **Database Credentials**: Supply database credentials via `DB_PASSWORD` or `POSTGRES_PASSWORD` environment variables.
 
 ### C. Database Connection Pooling
 - Flask's `get_db()` currently opens a direct connection per request. In production under high concurrency (e.g., month-end surges), configure connection pooling via `psycopg2.pool.ThreadedConnectionPool` or deploy `pgbouncer` to prevent connection exhaustion.
 
 ### D. Unicode Font Availability for PDFs
-- Ensure the production server or Docker container has Indic TrueType fonts installed:
-  ```bash
-  apt-get update && apt-get install -y fonts-noto-core fonts-indic
-  ```
-- Alternatively, set `indic_font_path` in `config/app.ini` pointing to a verified TTF font file.
+- The Docker image automatically installs `fonts-noto-core` and `fonts-indic`. If deploying natively on Linux, ensure these packages are installed via apt.
 
 ### E. Nightly Deemed Approval Cron Scheduling
 - Ensure the approval script runs nightly at 02:00 AM via system crontab:
@@ -201,14 +205,27 @@ Before deploying this application to a production server or cloud virtual machin
 
 ---
 
-## 9. Final Git Status & Verification
+## 9. Historical Git Secrets & Secret Invalidation Disclosure
 
-All changes are committed cleanly to the local repository:
+> [!NOTE]
+> **Git History Disclosure Regarding Legacy Secrets**:
+> During initial repository baseline ingestion (`5f40cf0`), legacy development placeholder credentials (`ADMIN_PASSWORD = "sewasetu@123"`, `secret_key = ssp-prod-key-2023-donotshare`, and `password = sewasetu123`) were present in tracked files from the vendor's handover.
+>
+> In accordance with standard DevSecOps principles and the assessment requirement to preserve the original Git commit history and audit trail:
+> 1. **Secret Rotation and Invalidation**: These historical placeholder credentials are considered permanently compromised/invalidated.
+> 2. **Environment Isolation**: The current application codebase no longer uses hardcoded credentials and strictly reads secrets from runtime environment variables.
+> 3. **Startup Enforcement**: If `APP_ENV=production` is enabled and any historical default credential is used, the application deliberately aborts startup with a fatal security error.
+> 4. **History Preservation**: Git history rewriting (such as `git filter-repo`) was intentionally **not performed**, as rewriting past commits would destroy all existing commit hashes and violate the requirement to demonstrate the step-by-step repair history of the legacy codebase.
+
+---
+
+## 10. Final Verification Status
+
 ```text
 $ git status
 On branch master
 nothing to commit, working tree clean
 
 $ pytest -v
-======================= 57 passed, 61 warnings in 5.76s =======================
+======================= 64 passed, 61 warnings in 7.98s =======================
 ```

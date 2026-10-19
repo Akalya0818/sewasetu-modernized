@@ -1,7 +1,11 @@
-# Production citizen data & database dumps
-seed/
+# Production citizen data & database dumps (strictly exclude real citizen data)
+seed/seed.sql
 *.sql
 !app/schema.sql
+!seed/synthetic_seed.sql
+
+# Submission zip archives
+*.zip
 
 # Production server logs archive & raw logs
 logs/

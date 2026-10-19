@@ -2,21 +2,40 @@ services:
   db:
     image: postgres:15
     environment:
-      POSTGRES_DB: sewasetu
-      POSTGRES_USER: sewasetu
-      POSTGRES_PASSWORD: sewasetu123
+      POSTGRES_DB: ${POSTGRES_DB:-sewasetu}
+      POSTGRES_USER: ${POSTGRES_USER:-sewasetu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-db-password-change-in-production}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sewasetu} -d ${POSTGRES_DB:-sewasetu}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./seed/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+      - ./seed/synthetic_seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
 
   app:
     build: ./app
     ports:
       - "8000:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - SECRET_KEY=${SECRET_KEY:-dev-insecure-flask-secret-key-change-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-dev-admin-password-change-in-production}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-sewasetu}
+      - DB_USER=${POSTGRES_USER:-sewasetu}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-dev-db-password-change-in-production}
+      - SMS_GATEWAY_URL=http://smsgw:8025
     depends_on:
-      - db
-      - smsgw
+      db:
+        condition: service_healthy
+      smsgw:
+        condition: service_started
     volumes:
       - uploads:/var/sewasetu/uploads
       - applogs:/var/log/sewasetu
@@ -24,8 +43,17 @@ services:
   scheduler:
     build: ./app
     command: ["cron", "-f"]
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-sewasetu}
+      - DB_USER=${POSTGRES_USER:-sewasetu}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-dev-db-password-change-in-production}
+      - SMS_GATEWAY_URL=http://smsgw:8025
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - applogs:/var/log/sewasetu
 
