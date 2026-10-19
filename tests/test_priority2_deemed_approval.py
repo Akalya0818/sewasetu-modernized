@@ -307,3 +307,68 @@ def test_e_audit_integrity(test_db):
     assert status_e2 == 'PENDING'
     assert decided_at_e2 is None, "Pending records must have NULL decided_at"
     assert decided_by_e2 is None or decided_by_e2 == '', "Pending records must have NULL decided_by"
+
+
+# ---------------------------------------------------------------------------
+# Test F: Unresolved Eligibility Edge Cases & Config Failure Safety
+# ---------------------------------------------------------------------------
+
+def test_f1_unresolved_eligibility_and_boundary_age(test_db):
+    """
+    Test F.1: Edge cases for applicant eligibility:
+    1. NULL dob: Unresolved age eligibility -> Must NOT be approved; remain PENDING.
+    2. Malformed dob string: Invalid data -> Must NOT crash job or be approved; remain PENDING.
+    3. Applicant aged 59 on submission date who turned 60 before cron run:
+       Statutory rule requires age >= 60 ON submission date -> Must NOT be approved; remain PENDING.
+    """
+    now = datetime(2026, 4, 1, 2, 0, 0)
+    overdue_time = now - timedelta(days=20)  # 2026-03-12
+
+    cur = test_db.cursor()
+    # 1. NULL dob
+    cur.execute("""
+        INSERT INTO applications (application_no, applicant_name, mobile, dob, status, submitted_at)
+        VALUES ('SSP_F1_NULLDOB', 'Missing DOB Citizen', '9800000091', NULL, 'PENDING', %s)
+    """, (overdue_time,))
+
+    # 2. Corrupt / invalid dob format
+    cur.execute("""
+        INSERT INTO applications (application_no, applicant_name, mobile, dob, status, submitted_at)
+        VALUES ('SSP_F1_CORRUPT', 'Corrupt DOB Citizen', '9800000092', 'NOT_A_DATE', 'PENDING', %s)
+    """, (overdue_time,))
+
+    # 3. Turns 60 on 2026-03-25. On submission date (2026-03-12), was 59 years and 352 days old.
+    cur.execute("""
+        INSERT INTO applications (application_no, applicant_name, mobile, dob, status, submitted_at)
+        VALUES ('SSP_F1_AGE_SUB', 'Turns 60 Later', '9800000093', '1966-03-25', 'PENDING', %s)
+    """, (overdue_time,))
+    test_db.commit()
+
+    run_deemed_approval_job(test_db, current_time=now)
+
+    cur.execute("SELECT application_no, status FROM applications WHERE application_no LIKE 'SSP_F1%' ORDER BY application_no")
+    results = dict(cur.fetchall())
+
+    assert results['SSP_F1_NULLDOB'] == 'PENDING', "Record with NULL DOB must not be auto-approved"
+    assert results['SSP_F1_CORRUPT'] == 'PENDING', "Record with corrupt DOB must not be auto-approved"
+    assert results['SSP_F1_AGE_SUB'] == 'PENDING', "Applicant underage on submission date must not be auto-approved"
+
+
+def test_f2_config_loading_failure_safety(tmp_path):
+    """
+    Test F.2: Config loading must fail safely and clearly if configuration is missing or invalid.
+    """
+    import deemed_approval
+    # Non-existent config directory
+    with pytest.raises(FileNotFoundError):
+        deemed_approval.load_config(base_dir=str(tmp_path / "nonexistent"))
+
+    # Config directory with empty app.ini
+    invalid_dir = tmp_path / "invalid_cfg"
+    cfg_subdir = invalid_dir / "config"
+    cfg_subdir.mkdir(parents=True)
+    (cfg_subdir / "app.ini").write_text("[some_random_section]\nfoo = bar\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid configuration"):
+        deemed_approval.load_config(base_dir=str(invalid_dir))
+
