@@ -29,6 +29,13 @@ class SqliteCursorWrapper:
     def fetchall(self):
         return self.cursor.fetchall()
 
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
     def close(self):
         self.cursor.close()
 
