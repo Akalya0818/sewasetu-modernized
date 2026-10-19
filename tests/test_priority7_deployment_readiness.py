@@ -194,14 +194,14 @@ def test_production_gateway_blocks_missing_or_invalid_tokens(client, monkeypatch
 def test_production_gateway_permits_only_dedicated_gateway_auth_token(client, monkeypatch):
     """
     Test 10: In production, access is granted ONLY when the dedicated strong
-    GATEWAY_AUTH_TOKEN environment secret is presented via X-Gateway-Auth,
-    Authorization Bearer header, or query parameter.
+    GATEWAY_AUTH_TOKEN environment secret is presented via X-Gateway-Auth or
+    Authorization Bearer header.
     """
     import app as app_module
     monkeypatch.setattr(app_module, "APP_ENV", "production")
     monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "strong-dedicated-gateway-secret-54321")
 
-    # Valid X-Gateway-Auth header
+    # Valid X-Gateway-Auth header on API
     resp_hdr = client.get(
         "/__gateway/api/messages",
         headers={"X-Gateway-Auth": "strong-dedicated-gateway-secret-54321"}
@@ -209,16 +209,44 @@ def test_production_gateway_permits_only_dedicated_gateway_auth_token(client, mo
     assert resp_hdr.status_code == 200
     assert "messages" in resp_hdr.get_json()
 
-    # Valid Authorization Bearer header
+    # Valid Authorization Bearer header on API
     resp_bearer = client.get(
         "/__gateway/api/messages",
         headers={"Authorization": "Bearer strong-dedicated-gateway-secret-54321"}
     )
     assert resp_bearer.status_code == 200
 
-    # Valid query param for console
-    resp_console = client.get("/__gateway/?token=strong-dedicated-gateway-secret-54321")
+    # Valid X-Gateway-Auth header on console
+    resp_console = client.get(
+        "/__gateway/",
+        headers={"X-Gateway-Auth": "strong-dedicated-gateway-secret-54321"}
+    )
     assert resp_console.status_code == 200
     assert b"PurvSMS Gateway Console" in resp_console.data
+
+
+def test_production_gateway_rejects_query_string_tokens_even_if_valid(client, monkeypatch):
+    """
+    Test 11: In production, URL query strings (?token=...) MUST NOT be accepted for authentication,
+    even if the token value matches the valid GATEWAY_AUTH_TOKEN exactly.
+    Tokens in URLs are prone to leakage via proxy logs, referrer headers, and browser history.
+    Must return HTTP 403 Forbidden.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "strong-dedicated-gateway-secret-54321")
+
+    # Correct token passed via query string on console
+    resp_console = client.get("/__gateway/?token=strong-dedicated-gateway-secret-54321")
+    assert resp_console.status_code == 403, "Query-string token on /__gateway/ must be rejected with 403"
+
+    # Correct token passed via query string on messages API
+    resp_api = client.get("/__gateway/api/messages?token=strong-dedicated-gateway-secret-54321")
+    assert resp_api.status_code == 403, "Query-string token on /__gateway/api/messages must be rejected with 403"
+
+    # Invalid query-string token
+    resp_invalid = client.get("/__gateway/?token=wrong-token")
+    assert resp_invalid.status_code == 403
+
 
 
