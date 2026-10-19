@@ -43,6 +43,8 @@ class SqliteCursorWrapper:
 class SqliteConnectionWrapper:
     def __init__(self, conn):
         self.conn = conn
+        self.close_count = 0
+        self.closed = False
 
     def cursor(self):
         return SqliteCursorWrapper(self.conn.cursor())
@@ -54,7 +56,8 @@ class SqliteConnectionWrapper:
         self.conn.rollback()
 
     def close(self):
-        pass  # keep shared test db open until teardown
+        self.close_count += 1
+        self.closed = True
 
 
 SCHEMA_SQL = """
