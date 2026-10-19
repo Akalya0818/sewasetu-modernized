@@ -354,21 +354,162 @@ def test_f1_unresolved_eligibility_and_boundary_age(test_db):
     assert results['SSP_F1_AGE_SUB'] == 'PENDING', "Applicant underage on submission date must not be auto-approved"
 
 
-def test_f2_config_loading_failure_safety(tmp_path):
+def test_f2_missing_configuration_and_missing_required_settings(tmp_path):
     """
-    Test F.2: Config loading must fail safely and clearly if configuration is missing or invalid.
+    Test F.2: Config loading must fail safely and clearly if configuration is missing,
+    malformed, or incomplete. Default settings must NOT silently replace failures.
     """
     import deemed_approval
-    # Non-existent config directory
+
+    # 1. Non-existent config directory -> FileNotFoundError
     with pytest.raises(FileNotFoundError):
         deemed_approval.load_config(base_dir=str(tmp_path / "nonexistent"))
 
-    # Config directory with empty app.ini
-    invalid_dir = tmp_path / "invalid_cfg"
-    cfg_subdir = invalid_dir / "config"
-    cfg_subdir.mkdir(parents=True)
-    (cfg_subdir / "app.ini").write_text("[some_random_section]\nfoo = bar\n", encoding="utf-8")
+    # 2. Non-existent CONFIG_PATH env var -> FileNotFoundError
+    with patch.dict(os.environ, {"CONFIG_PATH": str(tmp_path / "missing.ini")}):
+        with pytest.raises(FileNotFoundError, match="CONFIG_PATH"):
+            deemed_approval.load_config()
 
-    with pytest.raises(ValueError, match="Invalid configuration"):
-        deemed_approval.load_config(base_dir=str(invalid_dir))
+    # Helper to create config file
+    def create_cfg(content):
+        d = tmp_path / f"cfg_{hash(content)}"
+        cfg_dir = d / "config"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        ini_file = cfg_dir / "app.ini"
+        ini_file.write_text(content, encoding="utf-8")
+        return str(d)
+
+    # 3. Missing required sections
+    d_no_db = create_cfg("[pension]\nsla_days=15\nmin_age=60\nscheme_deadline=2026-10-31 23:59\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="missing required section \\[database\\]"):
+        deemed_approval.load_config(base_dir=d_no_db)
+
+    d_no_pension = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="missing required section \\[pension\\]"):
+        deemed_approval.load_config(base_dir=d_no_pension)
+
+    d_no_app = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=15\nmin_age=60\nscheme_deadline=2026-10-31 23:59\n")
+    with pytest.raises(ValueError, match="missing required section \\[app\\]"):
+        deemed_approval.load_config(base_dir=d_no_app)
+
+    # 4. Missing required settings within sections
+    d_no_sla = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nmin_age=60\nscheme_deadline=2026-10-31 23:59\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="missing required setting 'sla_days'"):
+        deemed_approval.load_config(base_dir=d_no_sla)
+
+    d_no_min_age = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=15\nscheme_deadline=2026-10-31 23:59\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="missing required setting 'min_age'"):
+        deemed_approval.load_config(base_dir=d_no_min_age)
+
+    d_no_deadline = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=15\nmin_age=60\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="missing required setting 'scheme_deadline'"):
+        deemed_approval.load_config(base_dir=d_no_deadline)
+
+    d_no_smsgw = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=15\nmin_age=60\nscheme_deadline=2026-10-31 23:59\n[app]\nsms_gateway_url=\n")
+    with pytest.raises(ValueError, match="missing required setting 'sms_gateway_url'"):
+        deemed_approval.load_config(base_dir=d_no_smsgw)
+
+    # 5. Invalid values
+    d_bad_int = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=invalid_number\nmin_age=60\nscheme_deadline=2026-10-31 23:59\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="expected integer setting"):
+        deemed_approval.load_config(base_dir=d_bad_int)
+
+    d_bad_date = create_cfg("[database]\nhost=db\nport=5432\nname=sewasetu\nuser=sewasetu\npassword=sewasetu123\n[pension]\nsla_days=15\nmin_age=60\nscheme_deadline=invalid_date_format\n[app]\nsms_gateway_url=http://smsgw:8025\n")
+    with pytest.raises(ValueError, match="invalid scheme_deadline format"):
+        deemed_approval.load_config(base_dir=d_bad_date)
+
+
+def test_f3_subprocess_fails_on_missing_config_without_db_connection(tmp_path):
+    """
+    Test F.3: Script executed via subprocess with invalid CONFIG_PATH exits with
+    code 1, reports a clear error to stderr, and never connects to PostgreSQL.
+    """
+    env = os.environ.copy()
+    env["CONFIG_PATH"] = str(tmp_path / "nonexistent_app.ini")
+    result = subprocess.run(
+        [sys.executable, SCRIPT_PATH],
+        capture_output=True,
+        text=True,
+        env=env
+    )
+    assert result.returncode == 1, "Script must exit with code 1 when configuration is missing"
+    assert "Configuration error" in result.stderr
+    assert "Database connection" not in result.stderr, "Script must not attempt DB connection when config fails"
+
+
+# ---------------------------------------------------------------------------
+# Test G: Concurrency & Zero-Rowcount Conditional Update Handling
+# ---------------------------------------------------------------------------
+
+def test_g_concurrency_conditional_update_zero_rowcount(test_db):
+    """
+    Test G: Concurrency protection via rowcount on conditional UPDATE:
+    Simulates a race condition where candidate records are fetched as PENDING,
+    but between candidate selection and UPDATE execution, a concurrent process
+    (e.g., an officer adjudication) updates one of the records.
+    The conditional update (WHERE id = %s AND status = 'PENDING') affects 0 rows (rowcount == 0).
+    Verifications:
+    1. The race-lost record is NOT counted as approved.
+    2. No SMS notification is queued or dispatched for the race-lost record.
+    3. The other eligible candidate is approved and notified normally.
+    4. The concurrent officer adjudication on the contested record is preserved.
+    """
+    import deemed_approval
+
+    now = datetime(2026, 4, 1, 2, 0, 0)
+    overdue_time = now - timedelta(days=20)
+
+    cur = test_db.cursor()
+    cur.execute("""
+        INSERT INTO applications (application_no, applicant_name, mobile, dob, status, submitted_at)
+        VALUES ('SSP_G1_WIN', 'Citizen First', '9800000101', '1960-01-01', 'PENDING', %s)
+    """, (overdue_time,))
+    cur.execute("""
+        INSERT INTO applications (application_no, applicant_name, mobile, dob, status, submitted_at)
+        VALUES ('SSP_G2_RACE', 'Citizen Contested', '9800000102', '1960-01-01', 'PENDING', %s)
+    """, (overdue_time,))
+    test_db.commit()
+
+    cur.execute("SELECT id FROM applications WHERE application_no = 'SSP_G2_RACE'")
+    g2_id = cur.fetchone()[0]
+
+    # Intercept execute on the cursor wrapper to simulate concurrent modification right before G2's deemed approval UPDATE
+    orig_cursor_fn = test_db.cursor
+    real_cur = orig_cursor_fn()
+
+    class InterceptingCursorWrapper(type(real_cur)):
+        def execute(self, query, params=None):
+            # If this is the deemed approval UPDATE for SSP_G2, simulate concurrent officer approval first
+            if "UPDATE applications" in query and "status = 'PENDING'" in query and params and g2_id in params:
+                # Concurrent officer approves the record immediately before this worker tries to deemed-approve it
+                self.cursor.execute(
+                    "UPDATE applications SET status = 'APPROVED', decided_by = 'OFFICER_CONCURRENT' WHERE id = ?",
+                    (g2_id,)
+                )
+            return super().execute(query, params)
+
+    def intercepting_cursor():
+        return InterceptingCursorWrapper(test_db.conn.cursor())
+
+    with patch.object(test_db, 'cursor', side_effect=intercepting_cursor):
+        with patch('requests.post') as mock_post:
+            mock_post.return_value.status_code = 200
+            approved_count = deemed_approval.process_deemed_approvals(test_db, now=now)
+
+            # 1. Only SSP_G1_WIN should be deemed approved; SSP_G2_RACE affected 0 rows
+            assert approved_count == 1, f"Expected 1 deemed approval, got {approved_count}"
+
+            # 2. SMS notification verification: exactly 1 SMS sent (for G1 only)
+            assert mock_post.call_count == 1, f"Expected 1 SMS sent, got {mock_post.call_count}"
+            sent_payload = mock_post.call_args[1]['json']
+            assert sent_payload['to'] == '9800000101', "SMS must only be sent to G1"
+            assert 'SSP_G1_WIN' in sent_payload['text']
+
+    # 3. Database verification
+    cur.execute("SELECT application_no, status, decided_by FROM applications WHERE application_no LIKE 'SSP_G%' ORDER BY application_no")
+    records = dict((r[0], (r[1], r[2])) for r in cur.fetchall())
+
+    assert records['SSP_G1_WIN'] == ('DEEMED_APPROVED', 'RTPS-AUTO'), "G1 must be deemed approved by RTPS-AUTO"
+    assert records['SSP_G2_RACE'] == ('APPROVED', 'OFFICER_CONCURRENT'), "Contested record must retain concurrent officer decision"
+
 

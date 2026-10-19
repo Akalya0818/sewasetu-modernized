@@ -23,10 +23,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def load_config(base_dir=None):
     """
     Locates and parses the configuration file (app.ini).
-    Fails safely if configuration is missing or invalid.
+    Fails safely if configuration is missing, malformed, or incomplete.
     """
     config_path = os.environ.get("CONFIG_PATH")
-    if not config_path or not os.path.exists(config_path):
+    if config_path:
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Configuration file specified in CONFIG_PATH not found: {config_path}")
+    else:
         if base_dir is None:
             base_dir = BASE_DIR
         config_path = os.path.join(base_dir, "config", "app.ini")
@@ -42,25 +45,57 @@ def load_config(base_dir=None):
                     raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     cfg = configparser.ConfigParser()
-    with open(config_path, "r", encoding="utf-8") as fh:
-        cfg.read_file(fh)
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            cfg.read_file(fh)
+    except Exception as e:
+        raise ValueError(f"Failed to read or parse configuration file '{config_path}': {e}") from e
 
-    if not cfg.has_section("pension") or not cfg.has_section("database"):
-        raise ValueError("Invalid configuration: missing required sections [pension] or [database]")
+    # Strictly validate required sections and required settings
+    required = {
+        "database": ["host", "port", "name", "user", "password"],
+        "pension": ["sla_days", "min_age", "scheme_deadline"],
+        "app": ["sms_gateway_url"],
+    }
+    for sec, keys in required.items():
+        if not cfg.has_section(sec):
+            raise ValueError(f"Invalid configuration: missing required section [{sec}]")
+        for key in keys:
+            if not cfg.has_option(sec, key) or cfg.get(sec, key).strip() == "":
+                raise ValueError(f"Invalid configuration: missing required setting '{key}' in [{sec}]")
+
+    # Strictly validate integer and timestamp formats
+    try:
+        cfg.getint("pension", "sla_days")
+        cfg.getint("pension", "min_age")
+        cfg.getint("database", "port")
+    except ValueError as e:
+        raise ValueError(f"Invalid configuration: expected integer setting ({e})") from e
+
+    try:
+        datetime.strptime(cfg.get("pension", "scheme_deadline"), "%Y-%m-%d %H:%M")
+    except ValueError as e:
+        raise ValueError(f"Invalid configuration: invalid scheme_deadline format ({e})") from e
 
     return cfg
 
 
 # Module-level configuration for backwards compatibility
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "app.ini")
+config = None
+SLA_DAYS = None
+SMS_GATEWAY_URL = None
+
 try:
     config = load_config()
-    SLA_DAYS = config.getint("pension", "sla_days", fallback=15)
-    SMS_GATEWAY_URL = config.get("app", "sms_gateway_url", fallback="http://smsgw:8025")
+    SLA_DAYS = config.getint("pension", "sla_days")
+    SMS_GATEWAY_URL = config.get("app", "sms_gateway_url")
 except Exception:
-    config = configparser.ConfigParser()
-    SLA_DAYS = 15
-    SMS_GATEWAY_URL = "http://smsgw:8025"
+    # Do not silently substitute default settings when config fails to load.
+    # Keep them None so any code relying on module-level attributes will fail clearly.
+    config = None
+    SLA_DAYS = None
+    SMS_GATEWAY_URL = None
 
 
 def get_db_connection(cfg):
@@ -110,11 +145,11 @@ def process_deemed_approvals(conn, now=None, cfg=None):
     if now is None:
         now = datetime.now()
 
-    sla_days = cfg.getint("pension", "sla_days", fallback=15)
-    min_age = cfg.getint("pension", "min_age", fallback=60)
-    scheme_deadline_raw = cfg.get("pension", "scheme_deadline", fallback="2026-10-31 23:59")
+    sla_days = cfg.getint("pension", "sla_days")
+    min_age = cfg.getint("pension", "min_age")
+    scheme_deadline_raw = cfg.get("pension", "scheme_deadline")
     scheme_deadline = datetime.strptime(scheme_deadline_raw, "%Y-%m-%d %H:%M")
-    sms_gateway_url = cfg.get("app", "sms_gateway_url", fallback="http://smsgw:8025")
+    sms_gateway_url = cfg.get("app", "sms_gateway_url")
 
     cutoff = now - timedelta(days=sla_days)
 
@@ -177,7 +212,7 @@ def process_deemed_approvals(conn, now=None, cfg=None):
                    WHERE id = %s AND status = 'PENDING'""",
                 (now, app_id)
             )
-            if getattr(cur, "rowcount", 1) > 0:
+            if cur.rowcount > 0:
                 approved_records.append((app_no, mobile))
                 seen_mobiles.add(mobile)
 
