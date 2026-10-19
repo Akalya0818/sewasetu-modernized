@@ -154,17 +154,14 @@ While the SQL injection vulnerability on `/status/reset` was eliminated in Prior
    - The system immediately overwrites `portal_users.password_hash` with the birthdate hash without prior OTP verification.
    - An attacker can hijack access or permanently invalidate the citizen's existing credentials.
 
-### Feasibility Assessment: SMS OTP Password Reset
-A secure replacement was assessed against the existing codebase:
-- **Limitation 1 (Department Circular Mandate)**: Lines 353 and 388 of `app/app.py` document that portal credentials were intentionally mandated as date-of-birth by departmental circular. The portal has no `/change-password` route or UI for citizens to set custom passwords.
-- **Limitation 2 (Multi-Step Journey Required)**: A secure reset journey requires:
-  1. Citizen enters mobile number $\rightarrow$ server verifies account and issues 6-digit OTP to `otps` table.
-  2. Citizen enters OTP on a verification page $\rightarrow$ server validates OTP window.
-  3. Citizen submits a new password $\rightarrow$ server updates hash.
-- **Decision**: Implementing an ad-hoc OTP reset flow without formal approval from the Department of Social Welfare would break existing citizen communications and UI contracts.
+### Remediation Implemented
+In accordance with government data protection mandates:
+- The `/status/reset` endpoint has been **safely blocked by default** (returning HTTP 403 Forbidden with an administrative advisory notice directing citizens to their nearest Block Development Office or Seva Kendra).
+- The endpoint **never mutates `portal_users.password_hash`**, completely eliminating the vulnerability of arbitrary account takeover or credential erasure.
+- Regression tests in `tests/test_priority4_security_and_privacy.py` (`test_d2`) verify that submitting a mobile number never overwrites stored passwords.
 
-**Action Required Prior to Production Deployment**:
-Until the Department approves a formal password-management specification, `/status/reset` should be disabled at the reverse-proxy level (HTTP 403 / 404), or password resets must be processed in-person at block Seva Kendras.
+**Action Required for Full Online Password Management**:
+Before introducing an online self-service password reset feature in a future major release, the Department of Social Welfare must approve a formal two-factor SMS OTP authentication and custom password policy. Until that time, the endpoint remains safely blocked.
 
 ---
 
