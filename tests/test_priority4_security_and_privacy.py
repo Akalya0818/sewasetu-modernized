@@ -430,7 +430,7 @@ def test_d1_sql_injection_payload_does_not_manipulate_query(client, test_db, sam
     orig_hash = cur.fetchone()[0]
 
     resp = client.post("/status/reset", data={"mobile": sqli_payload}, follow_redirects=True)
-    assert resp.status_code == 200
+    assert resp.status_code in (200, 403)
 
     # Ensure no accounts were arbitrarily reset due to tautology injection
     cur.execute("SELECT password_hash FROM portal_users WHERE mobile = '9800000401'")
@@ -438,30 +438,38 @@ def test_d1_sql_injection_payload_does_not_manipulate_query(client, test_db, sam
     assert new_hash == orig_hash, "SQL injection must not modify password hash of arbitrary accounts"
 
 
-def test_d2_valid_mobile_password_reset_functional(client, test_db, sample_applications):
+def test_d2_vulnerable_dob_password_reset_is_blocked(client, test_db, sample_applications):
     """
-    Test D.2: Legitimate password reset resets the password to DOB as DDMMYYYY.
+    Test D.2: Vulnerable unauthenticated date-of-birth password reset must be safely blocked.
+    Submitting a mobile number must NOT change the citizen's password hash in portal_users.
     """
     mobile = sample_applications["citizen_a"]["mobile"]
 
-    resp = client.post("/status/reset", data={"mobile": mobile}, follow_redirects=True)
-    assert resp.status_code == 200
-    assert b"If the mobile number exists" in resp.data
-
+    # Set a custom password first to verify it is not overwritten with DOB
     cur = test_db.cursor()
+    custom_hash = hash_password("CustomSecure#2026")
+    cur.execute("UPDATE portal_users SET password_hash = %s WHERE mobile = %s", (custom_hash, mobile))
+    test_db.commit()
+
+    resp = client.post("/status/reset", data={"mobile": mobile}, follow_redirects=True)
+    assert resp.status_code in (200, 403)
+    assert b"disabled" in resp.data or b"Seva Kendra" in resp.data or resp.status_code == 403
+
+    # CRITICAL: Database password hash must NOT have been changed to DOB
     cur.execute("SELECT password_hash FROM portal_users WHERE mobile = %s", (mobile,))
     new_hash = cur.fetchone()[0]
-    assert new_hash == hash_password("01011960"), "Password must be reset to DOB (01011960)"
+    assert new_hash == custom_hash, "Password hash must remain unchanged; unauthenticated reset must not modify credentials"
+    assert new_hash != hash_password("01011960"), "Must NOT reset password to predictable date-of-birth"
 
 
 def test_d3_unknown_mobile_does_not_reveal_account_existence(client):
     """
     Test D.3: Requesting password reset for an unregistered mobile number returns
-    generic confirmation without leaking account existence or database errors.
+    safe guidance without leaking account existence or database errors.
     """
     resp = client.post("/status/reset", data={"mobile": "9999999999"}, follow_redirects=True)
-    assert resp.status_code == 200
-    assert b"If the mobile number exists, the password has been reset and sent by SMS." in resp.data
+    assert resp.status_code in (200, 403)
+    assert b"disabled" in resp.data or b"Seva Kendra" in resp.data or b"exists" in resp.data
 
 
 def test_d4_malformed_mobile_password_reset_handled_safely(client, test_db):
@@ -471,8 +479,7 @@ def test_d4_malformed_mobile_password_reset_handled_safely(client, test_db):
     """
     for malformed in ["not-a-number", "9800000401; DROP TABLE applications;", "", "   "]:
         resp = client.post("/status/reset", data={"mobile": malformed}, follow_redirects=True)
-        assert resp.status_code == 200
-        assert b"If the mobile number exists, the password has been reset and sent by SMS." in resp.data
+        assert resp.status_code in (200, 403)
 
 
 # ---------------------------------------------------------------------------
