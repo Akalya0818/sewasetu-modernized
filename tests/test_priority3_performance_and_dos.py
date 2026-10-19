@@ -262,17 +262,21 @@ def test_d1_acknowledgment_preserves_all_required_citizen_data(client, test_db, 
     pdf_bytes = generate_acknowledgment(cur, app_id)
     assert pdf_bytes.startswith(b"%PDF"), "Must produce valid PDF format"
 
-    # Check text presence inside PDF by decompressing FlateDecode streams
-    import zlib, re
-    streams = re.findall(rb'stream\r?\n(.*?)\r?\nendstream', pdf_bytes, re.DOTALL)
-    decompressed_text = ""
-    for s in streams:
-        try:
-            decompressed_text += zlib.decompress(s).decode('latin-1', errors='ignore')
-        except Exception:
-            pass
-
-    pdf_text = decompressed_text or pdf_bytes.decode('latin-1', errors='ignore')
+    # Check text presence inside PDF (supporting both core fonts and Unicode CID fonts)
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        pdf_text = "".join(page.extract_text() for page in reader.pages)
+    except Exception:
+        import zlib, re
+        streams = re.findall(rb'stream\r?\n(.*?)\r?\nendstream', pdf_bytes, re.DOTALL)
+        decompressed_text = ""
+        for s in streams:
+            try:
+                decompressed_text += zlib.decompress(s).decode('latin-1', errors='ignore')
+            except Exception:
+                pass
+        pdf_text = decompressed_text or pdf_bytes.decode('latin-1', errors='ignore')
 
     assert "GOVERNMENT OF PURVANCHAL" in pdf_text
     assert "Department of Social Welfare" in pdf_text

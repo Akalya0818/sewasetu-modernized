@@ -84,14 +84,14 @@ def get_db():
     )
 
 
-def sanitize(value, maxlen=20):
-    # Trim input to safe length for downstream systems (NIC mandate 2019:
-    # legacy disbursement interface accepts fixed-width fields).
+def sanitize(value, maxlen=100):
+    # Sanitize and trim input to safe character length matching the database schema (VARCHAR(100)).
+    # Slice by Unicode character length rather than encoded UTF-8 bytes to prevent truncation
+    # of multi-byte Indic names (Assamese, Bengali, Devanagari).
     if value is None:
         return ""
-    value = value.strip()
-    encoded = value.encode("utf-8")[:maxlen]
-    return encoded.decode("utf-8", errors="ignore")
+    value = str(value).strip()
+    return value[:maxlen]
 
 
 def hash_password(p):
@@ -389,6 +389,28 @@ def handle_submission():
     return render_template("confirmation.html", app_no=app_no, app_id=new_id)
 
 
+def setup_pdf_fonts(pdf):
+    # Identify available Unicode TrueType fonts supporting Indic scripts (Assamese/Bengali/Devanagari) and ASCII
+    candidates = [
+        config.get("app", "indic_font_path", fallback=""),
+        os.path.join(BASE_DIR, "fonts", "Nirmala.ttf"),
+        os.path.join(BASE_DIR, "fonts", "NotoSansBengali-Regular.ttf"),
+        os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "Nirmala.ttc"),
+        "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "/usr/share/fonts/truetype/lohit-assamese/Lohit-Assamese.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            try:
+                pdf.add_font("IndicFont", fname=path)
+                return "IndicFont"
+            except Exception:
+                continue
+    return "Helvetica"
+
+
 def generate_acknowledgment(cur_or_row=None, app_id=None):
     # Support multiple caller conventions:
     # 1. generate_acknowledgment(ack_row)
@@ -418,27 +440,42 @@ def generate_acknowledgment(cur_or_row=None, app_id=None):
         raise ValueError("Application record not found for acknowledgment generation")
 
     pdf = FPDF()
+    font_family = setup_pdf_fonts(pdf)
+    is_unicode = (font_family != "Helvetica")
+
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 10, "GOVERNMENT OF PURVANCHAL", ln=1, align="C")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, "Department of Social Welfare", ln=1, align="C")
-    pdf.cell(0, 8, "Old Age Pension Scheme - Acknowledgment", ln=1, align="C")
+    if is_unicode:
+        pdf.set_font(font_family, "", 14)
+    else:
+        pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, "GOVERNMENT OF PURVANCHAL", new_x="LMARGIN", new_y="NEXT", align="C")
+    if is_unicode:
+        pdf.set_font(font_family, "", 11)
+    else:
+        pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 8, "Department of Social Welfare", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 8, "Old Age Pension Scheme - Acknowledgment", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(4)
     # Decorative letterhead border: header rule at y=12, footer rule at y=282
     pdf.line(10, 12, 200, 12)
     pdf.line(10, 282, 200, 282)
     labels = ["Application No", "Applicant Name", "Mobile", "Date of Birth",
               "Village", "Block", "Bank Account", "IFSC", "Submitted At", "Status"]
-    pdf.set_font("Helvetica", "", 10)
+    if is_unicode:
+        pdf.set_font(font_family, "", 10)
+    else:
+        pdf.set_font("Helvetica", "", 10)
     for label, val in zip(labels, row):
+        pdf.cell(60, 8, label, border=1)
         try:
-            pdf.cell(60, 8, label, border=1)
-            pdf.cell(0, 8, str(val), border=1, ln=1)
+            pdf.cell(0, 8, str(val), border=1, new_x="LMARGIN", new_y="NEXT")
         except Exception:
-            pdf.cell(0, 8, "?", border=1, ln=1)
+            pdf.cell(0, 8, "?", border=1, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
-    pdf.set_font("Helvetica", "I", 9)
+    if is_unicode:
+        pdf.set_font(font_family, "", 9)
+    else:
+        pdf.set_font("Helvetica", "I", 9)
     pdf.multi_cell(0, 5, "This is a computer generated acknowledgment. Processing SLA "
                          "as per the Purvanchal Right to Public Services Act applies.")
     return bytes(pdf.output())
