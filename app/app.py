@@ -216,7 +216,7 @@ def upload():
         if f is None or f.filename == "":
             flash("Please select an age proof document to upload.")
             return render_template("upload.html")
-        filename = f.filename.lower()
+        filename = os.path.basename(f.filename.lower())
         content = f.read()
         allowed_extensions = (".pdf", ".jpg", ".jpeg")
         if not any(filename.endswith(ext) for ext in allowed_extensions):
@@ -225,6 +225,12 @@ def upload():
         max_size = 5 * 1024 * 1024  # 5 MB per UI specification
         if len(content) > max_size:
             flash("File exceeds the maximum size limit of 5 MB.")
+            return render_template("upload.html")
+        # Validate file header/magic bytes to reject disguised or corrupted files
+        is_valid_pdf = filename.endswith(".pdf") and content.startswith(b"%PDF")
+        is_valid_jpg = (filename.endswith(".jpg") or filename.endswith(".jpeg")) and content.startswith(b"\xff\xd8\xff")
+        if not (is_valid_pdf or is_valid_jpg):
+            flash("Invalid or corrupted document format. Please upload a valid PDF or JPG file.")
             return render_template("upload.html")
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         path = os.path.join(UPLOAD_DIR, "%s_%s" % (session["verified_mobile"], filename))

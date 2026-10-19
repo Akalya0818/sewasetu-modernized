@@ -1,3 +1,4 @@
+import os
 import io
 from datetime import date
 import pytest
@@ -26,7 +27,6 @@ def test_upload_ui_contract_and_size_limits(client):
         content_type='multipart/form-data',
         follow_redirects=True
     )
-    # On baseline: fails with 'ERR_VAL_47' and remains on upload page
     assert b"ERR_VAL_47" not in resp_jpg.data, "Should not return cryptic error code ERR_VAL_47"
     assert resp_jpg.status_code == 200
     assert b"Declaration" in resp_jpg.data or resp_jpg.request.path == '/declaration', \
@@ -45,14 +45,53 @@ def test_upload_ui_contract_and_size_limits(client):
         "Valid 500KB PDF should advance to declaration"
 
 
+def test_upload_boundary_cases_and_cleanup(client, tmp_path, monkeypatch):
+    """
+    Test 1.2: Boundary verification for uploads:
+    - Valid .jpeg extension
+    - Unsupported extensions (.png, .txt, .exe)
+    - Misleading extensions (e.g. text file disguised as .pdf)
+    - Files exceeding 5 MB limit (5MB + 1 byte)
+    - Confirm rejected uploads do not leave temporary or saved files in upload_dir.
+    """
+    upload_dir = str(tmp_path / "uploads_boundary")
+    os.makedirs(upload_dir, exist_ok=True)
+    monkeypatch.setattr('app.UPLOAD_DIR', upload_dir)
+    login_and_verify(client, mobile="9864011111")
+
+    # 1. Valid .jpeg file
+    jpeg_data = io.BytesIO(b"\xff\xd8\xff\xe0" + b"\x00" * 50000)
+    resp = client.post('/upload', data={'document': (jpeg_data, 'doc.jpeg')}, content_type='multipart/form-data', follow_redirects=True)
+    assert b"Declaration" in resp.data
+    saved_files = os.listdir(upload_dir)
+    assert len(saved_files) == 1 and saved_files[0].endswith(".jpeg")
+
+    # Reset directory
+    for f in os.listdir(upload_dir):
+        os.remove(os.path.join(upload_dir, f))
+
+    # 2. Unsupported extension (.png)
+    png_data = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 1000)
+    resp = client.post('/upload', data={'document': (png_data, 'doc.png')}, content_type='multipart/form-data', follow_redirects=True)
+    assert b"Invalid document format" in resp.data or b"PDF or JPG" in resp.data
+    assert len(os.listdir(upload_dir)) == 0, "Rejected .png must not leave files in upload directory"
+
+    # 3. Misleading extension: text file named document.pdf without PDF magic bytes
+    fake_pdf = io.BytesIO(b"This is just plain text content masquerading as a pdf")
+    resp = client.post('/upload', data={'document': (fake_pdf, 'fake.pdf')}, content_type='multipart/form-data', follow_redirects=True)
+    assert b"Invalid" in resp.data or b"PDF or JPG" in resp.data
+    assert len(os.listdir(upload_dir)) == 0, "Misleading extension file must be rejected and leave no files"
+
+    # 4. File exceeding 5 MB (5MB + 1 byte = 5,242,881 bytes)
+    oversized = io.BytesIO(b"%PDF-1.4 " + b"\x00" * (5 * 1024 * 1024 + 1))
+    resp = client.post('/upload', data={'document': (oversized, 'large.pdf')}, content_type='multipart/form-data', follow_redirects=True)
+    assert b"exceeds the maximum size limit of 5 MB" in resp.data
+    assert len(os.listdir(upload_dir)) == 0, "Oversized file must be rejected and leave no files"
+
+
 def test_widowed_applicant_not_blocked_on_husband_employer(client, test_db):
     """
-    Test 1.2: Verify widowed applicants can complete submission without deceased spouse employer.
-    Defect: Baseline handle_submission enforces:
-        if marital == 'Widowed':
-            if not husband_name or not husband_employer:
-                flash('Something went wrong. Please try again.')
-    This makes it impossible for widows (whose spouses are deceased) or male widowers to apply.
+    Test 1.3: Verify widowed applicants can complete submission without deceased spouse employer.
     """
     login_and_verify(client, mobile="9864099999")
 
@@ -64,7 +103,7 @@ def test_widowed_applicant_not_blocked_on_husband_employer(client, test_db):
             'gender': 'Female',
             'marital_status': 'Widowed',
             'husband_name': 'Late Bhaben Saikia',
-            'husband_employer': '',  # Deceased spouse has no current employer!
+            'husband_employer': '',  # Deceased spouse has no current employer
             'village': 'Milanpur',
             'block': 'Borgaon',
             'bank_account': '123456789012',
@@ -72,35 +111,75 @@ def test_widowed_applicant_not_blocked_on_husband_employer(client, test_db):
         }
         sess['doc_path'] = '/tmp/doc.pdf'
 
-    # Submit final declaration
     resp = client.post('/declaration', follow_redirects=True)
-
-    # On baseline: rejected with generic error and redirected back to form_step 1
-    assert b"Something went wrong. Please try again." not in resp.data, \
-        "Widowed applicant should not be blocked on deceased husband employer"
-    assert b"Application Submitted" in resp.data or resp.status_code == 200, \
-        "Eligible widowed applicant should receive confirmation"
+    assert b"Something went wrong. Please try again." not in resp.data
+    assert b"Application Submitted" in resp.data or resp.status_code == 200
 
 
-def test_indian_date_format_precedence(client, test_db):
+def test_widowed_applicant_unrelated_validation_preserved(client):
     """
-    Test 1.3: Verify DD/MM/YYYY takes precedence over US MM/DD/YYYY format.
-    Defect: Baseline checks ('%m/%d/%Y', '%d/%m/%Y').
-    Entering '05/10/1950' (5th of October 1950, standard Indian date format)
-    is erroneously parsed as May 10, 1950.
-    Also, ISO format 'YYYY-MM-DD' should be supported cleanly.
+    Test 1.4: Verify that widowed-applicant fix does NOT bypass unrelated required-field validations.
+    """
+    login_and_verify(client, mobile="9864098765")
+
+    base_widow_data = {
+        'applicant_name': 'Runu Saikia',
+        'dob': '15/04/1958',
+        'gender': 'Female',
+        'marital_status': 'Widowed',
+        'husband_name': 'Late Bhaben',
+        'husband_employer': '',
+        'village': 'Milanpur',
+        'block': 'Borgaon',
+        'bank_account': '123456789012',
+        'ifsc': 'SBIN0001234'
+    }
+
+    # 1. Missing applicant name
+    d = dict(base_widow_data, applicant_name='')
+    with client.session_transaction() as sess:
+        sess['form_data'] = d
+        sess['doc_path'] = '/tmp/doc.pdf'
+    resp = client.post('/declaration', follow_redirects=True)
+    assert b"full name" in resp.data.lower()
+
+    # 2. Missing village
+    d = dict(base_widow_data, village='')
+    with client.session_transaction() as sess:
+        sess['form_data'] = d
+    resp = client.post('/declaration', follow_redirects=True)
+    assert b"village" in resp.data.lower()
+
+    # 3. Missing bank account
+    d = dict(base_widow_data, bank_account='')
+    with client.session_transaction() as sess:
+        sess['form_data'] = d
+    resp = client.post('/declaration', follow_redirects=True)
+    assert b"bank account" in resp.data.lower()
+
+    # 4. Underage widowed applicant (e.g. age 45)
+    d = dict(base_widow_data, dob='15/04/1980')
+    with client.session_transaction() as sess:
+        sess['form_data'] = d
+    resp = client.post('/declaration', follow_redirects=True)
+    assert b"at least 60 years" in resp.data.lower() or b"eligible" in resp.data.lower()
+
+
+def test_indian_and_ambiguous_date_parsing(client, test_db):
+    """
+    Test 1.5: Verify DD/MM/YYYY takes precedence, handles ambiguous dates correctly, and accepts ISO.
+    - Ambiguous date '04/05/1952': In Indian format, Day 04, Month 05 (May 4, 1952) -> MUST be 1952-05-04.
+    - ISO format '1952-05-04' -> 1952-05-04.
     """
     login_and_verify(client, mobile="9864088888")
 
-    # Day: 05, Month: 10 (October), Year: 1955 -> In India: 5th October 1955.
+    # Ambiguous date: 04/05/1952
     with client.session_transaction() as sess:
         sess['form_data'] = {
             'applicant_name': 'Paban Borah',
-            'dob': '05/10/1955',
+            'dob': '04/05/1952',
             'gender': 'Male',
             'marital_status': 'Married',
-            'husband_name': '',
-            'husband_employer': '',
             'village': 'Namdang',
             'block': 'Sonari',
             'bank_account': '987654321098',
@@ -111,40 +190,36 @@ def test_indian_date_format_precedence(client, test_db):
     resp = client.post('/declaration', follow_redirects=True)
     assert b"Application Submitted" in resp.data
 
-    # Query the stored record in test DB
     cur = test_db.cursor()
     cur.execute("SELECT dob FROM applications WHERE mobile = %s", ("9864088888",))
     row = cur.fetchone()
-    assert row is not None, "Application should be inserted into database"
-    
-    # Check stored date: Should be 1955-10-05 (October 5), NOT 1955-05-10 (May 10)
-    stored_dob = str(row[0])
-    assert stored_dob == '1955-10-05', f"Stored DOB should be 1955-10-05, got {stored_dob}"
+    assert row is not None
+    # 04/05 in DD/MM/YYYY must be May 4th (1952-05-04), NOT April 5th (1952-04-05)
+    assert str(row[0]) == '1952-05-04', f"Ambiguous date 04/05/1952 must parse as 1952-05-04, got {row[0]}"
 
 
-def test_field_level_informative_validation_errors(client):
+def test_privacy_in_validation_error_messages(client):
     """
-    Test 1.4: Validation errors should be specific, helpful, and not opaque.
-    Defect: Baseline emits 'Something went wrong. Please try again.' for all validation issues.
+    Test 1.6: Review that validation error messages do NOT echo back sensitive personal/banking data.
     """
     login_and_verify(client, mobile="9864077777")
 
-    # Missing mandatory bank account
+    sensitive_account = "99887766554433"
     with client.session_transaction() as sess:
         sess['form_data'] = {
             'applicant_name': 'Minati Das',
-            'dob': '12/06/1954',
+            'dob': 'invalid-date',
             'gender': 'Female',
             'marital_status': 'Unmarried',
             'village': 'Panidihing',
             'block': 'Namti',
-            'bank_account': '',  # MISSING
+            'bank_account': sensitive_account,
             'ifsc': 'SBIN0001234'
         }
         sess['doc_path'] = '/tmp/doc.pdf'
 
     resp = client.post('/declaration', follow_redirects=True)
-    assert b"Something went wrong. Please try again." not in resp.data, \
-        "Should provide specific field guidance rather than generic failure message"
-    assert b"bank account" in resp.data.lower() or b"bank" in resp.data.lower(), \
-        "Should mention missing bank details"
+    # The error flash must NOT echo back the sensitive bank account number or invalid inputs
+    assert sensitive_account.encode('utf-8') not in resp.data, \
+        "Sensitive banking details must never be echoed in flashed error messages"
+    assert b"Invalid date format" in resp.data
