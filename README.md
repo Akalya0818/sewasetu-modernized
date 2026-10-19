@@ -209,7 +209,7 @@ Before deploying this application to a production server or cloud virtual machin
 ### F. SMS Gateway Public Access Protection & Separation of Duties
 - In production (`APP_ENV=production`), unauthenticated public visitors cannot read OTPs or view the diagnostic console at `/__gateway/` (returns HTTP 403 Forbidden).
 - **Separation of Duties**: Admin login sessions and `ADMIN_PASSWORD` credentials **cannot** access or harvest citizen OTPs or the telecom simulation routes.
-- Access is strictly restricted to an independent, dedicated `GATEWAY_AUTH_TOKEN` environment secret via `X-Gateway-Auth`, `Authorization: Bearer <token>`, or `?token=<token>`. If `GATEWAY_AUTH_TOKEN` is unset in production, the console and messages API are completely disabled.
+- **Header-Only Authentication**: Access is strictly restricted to an independent, dedicated `GATEWAY_AUTH_TOKEN` environment secret via HTTP request headers (`X-Gateway-Auth` or `Authorization: Bearer <token>`). Query-string token authentication (`?token=...`) is strictly rejected to prevent credential leakage in proxy access logs, referrer headers, and browser history. If `GATEWAY_AUTH_TOKEN` is unset in production, the console and messages API are completely disabled.
 
 ### G. Cloud Database Persistence & Assessment Availability (Render)
 - **Render Free PostgreSQL Lifecycle**: Render deletes free PostgreSQL databases after **30 days**.
@@ -242,6 +242,6 @@ On branch master
 nothing to commit, working tree clean
 
 $ pytest -v
-======================= 74 passed, 61 warnings in 22.50s =======================
+======================= 75 passed, 61 warnings in 22.45s =======================
 ```
 

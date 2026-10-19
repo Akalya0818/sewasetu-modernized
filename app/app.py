@@ -241,9 +241,10 @@ def is_gateway_authorized():
     if APP_ENV != "production":
         return True
 
-    # In production: separation of duties.
+    # In production: separation of duties & header-only authentication.
     # Administrative logins and ADMIN_PASSWORD credentials MUST NOT be used to harvest OTPs.
     # Access is strictly restricted to an independent dedicated GATEWAY_AUTH_TOKEN environment secret.
+    # Query strings (?token=...) are strictly rejected to prevent secret leaks in logs and referrers.
     gateway_secret = os.environ.get("GATEWAY_AUTH_TOKEN")
     if not gateway_secret or not gateway_secret.strip():
         # If no dedicated gateway token is configured in production, the console and API are disabled
@@ -254,9 +255,6 @@ def is_gateway_authorized():
         parts = request.headers.get("Authorization").split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
             auth_token = parts[1]
-
-    if not auth_token:
-        auth_token = request.args.get("token") or ""
 
     if auth_token and hmac.compare_digest(auth_token.strip(), gateway_secret.strip()):
         return True
