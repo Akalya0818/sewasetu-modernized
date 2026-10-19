@@ -3,6 +3,7 @@ seed/seed.sql
 *.sql
 !app/schema.sql
 !seed/synthetic_seed.sql
+!app/synthetic_seed.sql
 
 # Submission zip archives
 *.zip

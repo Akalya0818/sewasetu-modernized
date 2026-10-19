@@ -148,7 +148,7 @@ All modifications follow a strict test-first progression: each priority includes
 | **Priority 5** | **Unicode & Indic-Name Preservation**: Replaced 20-byte UTF-8 slicing with Unicode character sanitization (`VARCHAR(100)`); configured TrueType Indic font resolution (`Nirmala.ttc` / `NotoSansBengali`); eliminated `?` replacement on acknowledgment PDFs. | `tests/test_priority5_unicode_and_names.py` | `580c286` | `1c0062f` |
 | **Security Hardening** | **DOB Password Reset Blocking**: Safely blocked unauthenticated date-of-birth password reset on `/status/reset` with in-person advisory notice. | `tests/test_priority4_security_and_privacy.py` | `e0e2373` | `8243911` |
 | **Secrets & Infra** | **Environment Secrets & Docker Health**: Removed hardcoded passwords from tracked files; enforced startup failure on missing production secrets; added `.env.example`, synthetic seed mount, `pg_isready` healthcheck, and Indic fonts in Docker. | `tests/test_priority6_environment_and_secrets.py` | `399cdfd` | `83051d0` |
-| **Deployment Readiness** | **Cloud Deployment & Resiliency**: Added `/health` probe endpoints, `DATABASE_URL` managed Postgres support, dynamic `PORT` binding, embedded SMS gateway fallback, and Render blueprint (`render.yaml`). | `tests/test_priority7_deployment_readiness.py` | `f075139` | `194cd2c` |
+| **Deployment Readiness** | **Cloud Deployment & Resiliency**: Added `/health` probe endpoints, `DATABASE_URL` managed Postgres support, dynamic `PORT` binding, embedded SMS gateway fallback, Render blueprint (`render.yaml`), and production SMS console access control (`is_gateway_authorized`). | `tests/test_priority7_deployment_readiness.py` | `f075139`, `54a61b2` | `194cd2c`, `5378f1f` |
 
 ---
 
@@ -200,10 +200,22 @@ Before deploying this application to a production server or cloud virtual machin
 - The Docker image automatically installs `fonts-noto-core` and `fonts-indic`. If deploying natively on Linux, ensure these packages are installed via apt.
 
 ### E. Nightly Deemed Approval Cron Scheduling
-- Ensure the approval script runs nightly at 02:00 AM via system crontab:
+- In dedicated production worker containers, schedule the approval script nightly at 02:00 AM via crontab:
   ```cron
   0 2 * * * /usr/local/bin/python /app/scripts/deemed_approval.py >> /var/log/sewasetu/approval.log 2>&1
   ```
+- **Note**: Deemed approval is **not** scheduled on web instances or automatically against the public assessment database.
+
+### F. SMS Gateway Public Access Protection
+- In production (`APP_ENV=production`), unauthenticated public visitors cannot read OTPs or view the diagnostic console at `/__gateway/` (returns HTTP 403 Forbidden).
+- Access is restricted to authenticated administrator sessions or evaluators supplying `X-Gateway-Auth: <token>` or `Authorization: Bearer <token>`.
+
+### G. Cloud Database Persistence & Assessment Availability (Render)
+- **Render Free PostgreSQL Lifecycle**: Render deletes free PostgreSQL databases after **30 days**.
+- **Cold-Start Sleep**: Free web services sleep after 15 minutes of inactivity (~50s wake delay).
+- **Recommendation for 30-Day Evaluation**:
+  - Upgrade Render plan to **Starter** ($7/mo web + $7/mo database) for uninterrupted 30+ day availability and instant probe response times.
+  - If deploying on the free tier, configure an external health check (e.g., UptimeRobot) pinging `https://<app>.onrender.com/health` every 10 minutes, and note the 30-day database expiration date.
 
 ---
 
@@ -229,5 +241,6 @@ On branch master
 nothing to commit, working tree clean
 
 $ pytest -v
-======================= 69 passed, 61 warnings in 18.35s =======================
+======================= 72 passed, 61 warnings in 22.39s =======================
 ```
+

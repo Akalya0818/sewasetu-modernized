@@ -1,5 +1,16 @@
 # Render Infrastructure as Code (Blueprint) for Sewa Setu
 # Automatically provisions the web application and managed PostgreSQL database.
+#
+# IMPORTANT ASSESSMENT AVAILABILITY NOTICE:
+# - Assessment Requirement: The portal must remain accessible for assessor evaluation (~30 days).
+# - Render Free PostgreSQL Policy: Free tier databases are automatically terminated/deleted after 30 days.
+# - Render Free Web Service Policy: Free tier web services spin down after 15 minutes of inactivity
+#   (causing ~50s cold-start delays that may cause automated evaluator probes to timeout).
+# - Recommended Production Setting for Assessment:
+#   Change 'plan: free' to 'plan: starter' ($7/mo each) for persistent 30+ day evaluation
+#   without risk of database expiration or cold-start sleep.
+#   If deploying on 'plan: free', set up an external health probe (e.g., UptimeRobot) pinging
+#   https://<app>.onrender.com/health every 10 minutes, and note that Render will delete the DB at day 30.
 
 services:
   - type: web
@@ -8,6 +19,7 @@ services:
     dockerfilePath: app/Dockerfile
     dockerContext: app
     plan: free
+    preDeployCommand: python -m scripts.init_db
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
