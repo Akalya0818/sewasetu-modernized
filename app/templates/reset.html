@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Reset Password</h2>
-<form method="post">
-  <label>Registered Mobile Number</label>
-  <input type="text" name="mobile">
-  <p><button class="btn" type="submit">Reset Password</button></p>
-</form>
+<div class="note" style="border-left: 4px solid #b33; background: #fff5f5; padding: 12px; margin: 16px 0;">
+  <b>Notice:</b> Online self-service password reset is disabled for citizen data protection. To recover your portal credentials, please visit your nearest Block Development Office or Seva Kendra with valid age and identity proof.
+</div>
+<p><a href="/status">&laquo; Return to Status Login</a></p>
 {% endblock %}

@@ -573,34 +573,16 @@ def ack_pdf(app_id):
 
 @app.route("/status/reset", methods=["GET", "POST"])
 def reset_password():
+    # Online self-service password reset is disabled for citizen data protection.
+    # The legacy implementation reset passwords to the citizen's date of birth (DDMMYYYY),
+    # which created an unauthenticated account hijacking vulnerability.
+    # In accordance with government security mandates, credential recovery requires in-person
+    # verification at a Block Development Office or Seva Kendra.
     if request.method == "POST":
-        mobile = request.form.get("mobile", "").strip()
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            # Parameterized query to prevent SQL injection
-            cur.execute("SELECT mobile FROM portal_users WHERE mobile = %s", (mobile,))
-            row = cur.fetchone()
-            if row:
-                cur.execute("SELECT dob FROM applications WHERE mobile = %s ORDER BY id DESC LIMIT 1", (mobile,))
-                r2 = cur.fetchone()
-                if r2:
-                    dob_val = r2[0]
-                    if isinstance(dob_val, str):
-                        try:
-                            dob_val = datetime.strptime(dob_val[:10], "%Y-%m-%d").date()
-                        except ValueError:
-                            dob_val = datetime.strptime(dob_val[:10], "%d/%m/%Y").date()
-                    newpass = dob_val.strftime("%d%m%Y")
-                    cur.execute("UPDATE portal_users SET password_hash = %s WHERE mobile = %s",
-                                (hash_password(newpass), row[0]))
-                    conn.commit()
-                    send_sms(row[0], "Sewa Setu: your password has been reset to your "
-                                     "date of birth (DDMMYYYY).")
-        finally:
-            cur.close()
-            conn.close()
-        flash("If the mobile number exists, the password has been reset and sent by SMS.")
+        flash("Online password reset is disabled for citizen data protection. "
+              "Please visit your nearest Block Development Office or Seva Kendra "
+              "with valid identity proof to recover your portal credentials.")
+        return render_template("reset.html"), 403
     return render_template("reset.html")
 
 
