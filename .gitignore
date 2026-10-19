@@ -1,0 +1,35 @@
+# Production citizen data & database dumps
+seed/
+*.sql
+!app/schema.sql
+
+# Production server logs archive & raw logs
+logs/
+*.log
+*.log.gz
+*.tar.gz
+
+# Media files
+dc-briefing.mp3
+*.mp3
+*.wav
+
+# Uploads and citizen documents
+uploads/
+/var/sewasetu/uploads/
+ack/
+
+# Python cache & test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local environment & scratch files
+.env
+*.key
+scratch/
+.DS_Store
+Thumbs.db
