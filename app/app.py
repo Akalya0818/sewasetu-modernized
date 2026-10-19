@@ -15,7 +15,7 @@ import hashlib
 import secrets
 import hmac
 import configparser
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 import requests
 import psycopg2
@@ -63,6 +63,8 @@ INSECURE_DB_PASSWORDS = (
     "dev-db-password-change-in-production",
 )
 
+db_url_env = os.environ.get("DATABASE_URL")
+
 if APP_ENV == "production":
     if not SECRET_KEY or SECRET_KEY in INSECURE_SECRETS:
         raise RuntimeError(
@@ -74,9 +76,9 @@ if APP_ENV == "production":
             "FATAL [Production Security]: ADMIN_PASSWORD environment variable is missing, empty, "
             "or set to an insecure default. A strong administrator password is required in production."
         )
-    if not DB_PASSWORD or DB_PASSWORD in INSECURE_DB_PASSWORDS:
+    if not db_url_env and (not DB_PASSWORD or DB_PASSWORD in INSECURE_DB_PASSWORDS):
         raise RuntimeError(
-            "FATAL [Production Security]: DB_PASSWORD (or POSTGRES_PASSWORD) environment variable is missing, "
+            "FATAL [Production Security]: DB_PASSWORD (or POSTGRES_PASSWORD / DATABASE_URL) environment variable is missing, "
             "empty, or set to an insecure default. A strong database password is required in production."
         )
 else:
@@ -92,7 +94,12 @@ app.secret_key = SECRET_KEY
 app.config["PERMANENT_SESSION_LIFETIME"] = 300
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = config.get("app", "session_cookie_samesite", fallback="Lax")
-app.config["SESSION_COOKIE_SECURE"] = config.getboolean("app", "session_cookie_secure", fallback=False)
+
+cookie_secure_env = os.environ.get("SESSION_COOKIE_SECURE")
+if cookie_secure_env is not None:
+    app.config["SESSION_COOKIE_SECURE"] = cookie_secure_env.lower() in ("true", "1", "yes")
+else:
+    app.config["SESSION_COOKIE_SECURE"] = config.getboolean("app", "session_cookie_secure", fallback=False)
 
 def generate_csrf_token():
     if "csrf_token" not in session:
@@ -131,6 +138,9 @@ except Exception:
 
 
 def get_db():
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        return psycopg2.connect(db_url)
     return psycopg2.connect(
         host=os.environ.get("DB_HOST", config.get("database", "host")),
         port=int(os.environ.get("DB_PORT", config.get("database", "port"))),
@@ -154,12 +164,26 @@ def hash_password(p):
     return hashlib.sha256(p.encode("utf-8")).hexdigest()
 
 
+import time
+
+EMBEDDED_SMS_MESSAGES = []
+
 def send_sms(mobile, text):
-    try:
-        requests.post(SMS_GATEWAY_URL + "/api/send",
-                      json={"to": mobile, "text": text}, timeout=5)
-    except Exception as e:
-        app.logger.error("sms gateway error: %s" % e)
+    now = time.time()
+    msg = {
+        "id": len(EMBEDDED_SMS_MESSAGES) + 1,
+        "to": mobile,
+        "text": text,
+        "sent_at": now,
+        "delivery_at": now + 1,
+    }
+    EMBEDDED_SMS_MESSAGES.append(msg)
+    if SMS_GATEWAY_URL and SMS_GATEWAY_URL.startswith("http"):
+        try:
+            requests.post(SMS_GATEWAY_URL + "/api/send",
+                          json={"to": mobile, "text": text}, timeout=2)
+        except Exception as e:
+            app.logger.warning("External SMS gateway request skipped: %s", e)
 
 
 def deadline_remaining():
@@ -174,8 +198,33 @@ def new_application_no():
 
 
 # ---------------------------------------------------------------------------
-# Public pages
+# Public pages & health check
 # ---------------------------------------------------------------------------
+
+@app.route("/health")
+@app.route("/healthz")
+def healthcheck():
+    db_ok = False
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row[0] == 1:
+            db_ok = True
+    except Exception as e:
+        app.logger.warning("Healthcheck DB probe failed: %s", e)
+
+    status = "healthy" if db_ok else "degraded"
+    status_code = 200 if db_ok else 503
+    return jsonify({
+        "status": status,
+        "database": "connected" if db_ok else "unreachable",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }), status_code
+
 
 @app.route("/")
 def index():
@@ -187,19 +236,79 @@ def about():
     return render_template("about.html")
 
 
-@app.route("/__gateway/", defaults={"subpath": ""})
-@app.route("/__gateway/<path:subpath>")
+@app.route("/__gateway/", defaults={"subpath": ""}, methods=["GET", "POST"])
+@app.route("/__gateway/<path:subpath>", methods=["GET", "POST"])
 def gateway_proxy(subpath):
-    # Convenience proxy to the internal SMS gateway, so the OTP inbox is reachable
-    # on the main site without opening a second port on the host. The gateway
-    # itself runs only on the internal network.
-    try:
-        r = requests.get(SMS_GATEWAY_URL + "/" + subpath,
-                         params=request.args, timeout=5)
-        return (r.content, r.status_code,
-                {"Content-Type": r.headers.get("Content-Type", "text/html")})
-    except Exception as e:
-        return ("SMS gateway unreachable: %s" % e, 502)
+    # Proxy to external SMS gateway if reachable
+    if SMS_GATEWAY_URL and SMS_GATEWAY_URL.startswith("http"):
+        try:
+            r = requests.get(SMS_GATEWAY_URL + "/" + subpath,
+                             params=request.args, timeout=2)
+            if r.status_code == 200:
+                return (r.content, r.status_code,
+                        {"Content-Type": r.headers.get("Content-Type", "text/html")})
+        except Exception:
+            pass
+
+    # Seamless fallback to embedded simulation console & API
+    clean_subpath = subpath.strip("/")
+    if clean_subpath == "api/send" and request.method == "POST":
+        data = request.get_json(force=True, silent=True) or request.form
+        to = data.get("to", "")
+        text = data.get("text", "")
+        if not to or not text:
+            return jsonify({"status": "error", "reason": "to and text required"}), 400
+        now = time.time()
+        msg = {
+            "id": len(EMBEDDED_SMS_MESSAGES) + 1,
+            "to": to,
+            "text": text,
+            "sent_at": now,
+            "delivery_at": now + 1,
+        }
+        EMBEDDED_SMS_MESSAGES.append(msg)
+        return jsonify({"status": "queued", "id": msg["id"]})
+
+    if clean_subpath == "api/messages":
+        to = request.args.get("to", "")
+        now = time.time()
+        out = []
+        for m in EMBEDDED_SMS_MESSAGES:
+            if to and m["to"] != to:
+                continue
+            delivered = now >= m["delivery_at"]
+            out.append({
+                "id": m["id"],
+                "to": m["to"],
+                "text": m["text"] if delivered else None,
+                "delivered": delivered,
+                "sent_at": m["sent_at"],
+                "delivery_at": m["delivery_at"],
+            })
+        return jsonify({"messages": out})
+
+    now = time.time()
+    rows = ""
+    for m in reversed(EMBEDDED_SMS_MESSAGES[-100:]):
+        sent_hhmm = time.strftime("%H:%M:%S", time.localtime(m["sent_at"]))
+        delivered = now >= m["delivery_at"]
+        status_html = '<span style="color:#1b7e3c">Delivered</span>' if delivered else '<span style="color:#b36b00">Queued</span>'
+        text_display = m["text"] if delivered else "<i>(in transit)</i>"
+        rows += f"<tr><td>{m['id']}</td><td>{m['to']}</td><td>{text_display}</td><td>{sent_hhmm}</td><td>{status_html}</td></tr>"
+
+    html = f"""<!doctype html><html><head><title>PurvSMS Console</title>
+<meta http-equiv="refresh" content="5">
+<style>
+body{{font-family:Arial,sans-serif;margin:24px;background:#f4f4f4}}
+h2{{color:#1a3c6e}} table{{border-collapse:collapse;background:#fff;width:100%}}
+td,th{{border:1px solid #ccc;padding:6px 10px;font-size:14px;text-align:left}}
+</style></head><body>
+<h2>PurvSMS Gateway Console (simulation)</h2>
+<p>Messages appear below once the carrier delivers them. Auto-refreshes every 5s.</p>
+<table><tr><th>#</th><th>To</th><th>Message</th><th>Sent</th><th>Status</th></tr>
+{rows if rows else '<tr><td colspan="5" style="text-align:center;color:#666">No messages received yet.</td></tr>'}
+</table></body></html>"""
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 # ---------------------------------------------------------------------------

@@ -66,17 +66,19 @@ def load_config(base_dir=None):
 
     # Database password validation
     app_env = os.environ.get("APP_ENV", "development").lower()
+    db_url = os.environ.get("DATABASE_URL")
     db_pass = (
-        os.environ.get("DB_PASSWORD")
+        db_url
+        or os.environ.get("DB_PASSWORD")
         or os.environ.get("POSTGRES_PASSWORD")
         or (cfg.has_option("database", "password") and cfg.get("database", "password").strip())
     )
     insecure_db_passwords = ("sewasetu123", "dev-db-password-change-in-production")
     if app_env == "production":
-        if not db_pass or db_pass in insecure_db_passwords:
+        if not db_pass or (not db_url and db_pass in insecure_db_passwords):
             raise ValueError(
                 "FATAL [Production Security]: Database password is missing or using an insecure default. "
-                "Set DB_PASSWORD or POSTGRES_PASSWORD environment variable."
+                "Set DB_PASSWORD, POSTGRES_PASSWORD, or DATABASE_URL environment variable."
             )
     else:
         if not db_pass:
@@ -118,6 +120,9 @@ except Exception:
 
 def get_db_connection(cfg):
     """Establishes database connection using configuration settings and environment variables."""
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        return psycopg2.connect(db_url)
     db_pass = (
         os.environ.get("DB_PASSWORD")
         or os.environ.get("POSTGRES_PASSWORD")

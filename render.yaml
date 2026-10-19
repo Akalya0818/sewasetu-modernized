@@ -1,0 +1,32 @@
+# Render Infrastructure as Code (Blueprint) for Sewa Setu
+# Automatically provisions the web application and managed PostgreSQL database.
+
+services:
+  - type: web
+    name: sewasetu-portal
+    runtime: docker
+    dockerfilePath: app/Dockerfile
+    dockerContext: app
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: assessor_admin
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sewasetu-db
+          property: connectionString
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+
+databases:
+  - name: sewasetu-db
+    plan: free
+    databaseName: sewasetu
+    user: sewasetu

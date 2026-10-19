@@ -71,7 +71,9 @@ def test_embedded_sms_gateway_message_dispatch_and_inbox(client):
     test_otp = "852963"
     test_text = f"Your Sewa Setu OTP is {test_otp}."
 
-    app_module.send_sms(test_mobile, test_text)
+    # Send message via gateway API
+    post_resp = client.post("/__gateway/api/send", json={"to": test_mobile, "text": test_text})
+    assert post_resp.status_code == 200
 
     # Query the inbox via the gateway API
     resp = client.get(f"/__gateway/api/messages?to={test_mobile}")
