@@ -97,3 +97,66 @@ def test_public_routes_do_not_expose_stack_traces(client):
     assert b"Traceback" not in resp.data
     assert b"SECRET_KEY" not in resp.data
     assert b"ADMIN_PASSWORD" not in resp.data
+
+
+def test_production_gateway_blocks_unauthenticated_public_visitors(client, monkeypatch):
+    """
+    Test 6: In production (APP_ENV=production), unauthenticated public visitors
+    must NOT be able to view the SMS console or harvest citizen OTPs via the API.
+    Must return HTTP 403 Forbidden.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+
+    # Public visitor attempting to view console
+    resp_console = client.get("/__gateway/")
+    assert resp_console.status_code == 403, "Public access to SMS console must be blocked in production"
+
+    # Public visitor attempting to read messages API
+    resp_api = client.get("/__gateway/api/messages")
+    assert resp_api.status_code == 403, "Public access to SMS messages API must be blocked in production"
+
+
+def test_production_gateway_permits_admin_session(client, monkeypatch):
+    """
+    Test 7: In production, an authenticated administrator session must be permitted
+    to view the diagnostic console and read delivered OTPs.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+        sess["admin"] = True
+
+    resp_console = client.get("/__gateway/")
+    assert resp_console.status_code == 200
+    assert b"PurvSMS Gateway Console" in resp_console.data
+
+    resp_api = client.get("/__gateway/api/messages")
+    assert resp_api.status_code == 200
+
+
+def test_production_gateway_permits_auth_header(client, monkeypatch):
+    """
+    Test 8: In production, an automated probe or script presenting the correct
+    X-Gateway-Auth or Bearer token header must be permitted to read messages.
+    """
+    import app as app_module
+    monkeypatch.setattr(app_module, "APP_ENV", "production")
+    monkeypatch.setattr(app_module, "ADMIN_PASSWORD", "test-eval-token-98765")
+
+    # Valid header
+    resp_ok = client.get(
+        "/__gateway/api/messages",
+        headers={"X-Gateway-Auth": "test-eval-token-98765"}
+    )
+    assert resp_ok.status_code == 200
+
+    # Invalid header
+    resp_bad = client.get(
+        "/__gateway/api/messages",
+        headers={"X-Gateway-Auth": "wrong-token"}
+    )
+    assert resp_bad.status_code == 403
+
