@@ -458,34 +458,58 @@ def status_login():
 
 @app.route("/application/<int:app_id>")
 def view_application(app_id):
-    if not session.get("logged_in"):
+    if not session.get("logged_in") and not session.get("admin"):
         flash("Please login to view application status.")
         return redirect(url_for("status_login"))
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
-                "bank_account, ifsc, status, submitted_at, decided_at "
-                "FROM applications WHERE id = %s", (app_id,))
-    row = cur.fetchone()
-    cur.close(); conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT application_no, applicant_name, mobile, dob, village, block, "
+                    "bank_account, ifsc, status, submitted_at, decided_at "
+                    "FROM applications WHERE id = %s", (app_id,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
     if not row:
         abort(404)
+
+    # Enforce authorization: Admin or record owner
+    is_admin = session.get("admin") is True
+    is_owner = session.get("portal_mobile") == row[2]
+    if not (is_admin or is_owner):
+        abort(403)
+
     return render_template("application.html", a=row, app_id=app_id)
 
 
 @app.route("/ack/<int:app_id>.pdf")
 def ack_pdf(app_id):
+    # Enforce authentication: must be logged in
+    if not session.get("logged_in") and not session.get("admin"):
+        abort(401)
+
+    conn = get_db()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT mobile FROM applications WHERE id = %s", (app_id,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+    if not row:
+        abort(404)
+
+    # Enforce authorization: Admin or record owner
+    is_admin = session.get("admin") is True
+    is_owner = session.get("portal_mobile") == row[0]
+    if not (is_admin or is_owner):
+        abort(403)
+
     path = os.path.join(UPLOAD_DIR, "ack", "%d.pdf" % app_id)
     if not os.path.exists(path):
-        conn = get_db()
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT id FROM applications WHERE id = %s", (app_id,))
-            if not cur.fetchone():
-                abort(404)
-        finally:
-            cur.close()
-            conn.close()
         data = generate_acknowledgment(app_id=app_id)
         return send_file(io.BytesIO(data), mimetype="application/pdf")
     return send_file(path, mimetype="application/pdf")
@@ -494,23 +518,32 @@ def ack_pdf(app_id):
 @app.route("/status/reset", methods=["GET", "POST"])
 def reset_password():
     if request.method == "POST":
-        mobile = request.form.get("mobile", "")
+        mobile = request.form.get("mobile", "").strip()
         conn = get_db()
-        cur = conn.cursor()
-        # fetch account for reset
-        cur.execute("SELECT mobile FROM portal_users WHERE mobile = '%s'" % mobile)
-        row = cur.fetchone()
-        if row:
-            cur.execute("SELECT dob FROM applications WHERE mobile = '%s' LIMIT 1" % mobile)
-            r2 = cur.fetchone()
-            if r2:
-                newpass = r2[0].strftime("%d%m%Y")
-                cur.execute("UPDATE portal_users SET password_hash = %s WHERE mobile = %s",
-                            (hash_password(newpass), row[0]))
-                conn.commit()
-                send_sms(row[0], "Sewa Setu: your password has been reset to your "
-                                 "date of birth (DDMMYYYY).")
-        cur.close(); conn.close()
+        try:
+            cur = conn.cursor()
+            # Parameterized query to prevent SQL injection
+            cur.execute("SELECT mobile FROM portal_users WHERE mobile = %s", (mobile,))
+            row = cur.fetchone()
+            if row:
+                cur.execute("SELECT dob FROM applications WHERE mobile = %s ORDER BY id DESC LIMIT 1", (mobile,))
+                r2 = cur.fetchone()
+                if r2:
+                    dob_val = r2[0]
+                    if isinstance(dob_val, str):
+                        try:
+                            dob_val = datetime.strptime(dob_val[:10], "%Y-%m-%d").date()
+                        except ValueError:
+                            dob_val = datetime.strptime(dob_val[:10], "%d/%m/%Y").date()
+                    newpass = dob_val.strftime("%d%m%Y")
+                    cur.execute("UPDATE portal_users SET password_hash = %s WHERE mobile = %s",
+                                (hash_password(newpass), row[0]))
+                    conn.commit()
+                    send_sms(row[0], "Sewa Setu: your password has been reset to your "
+                                     "date of birth (DDMMYYYY).")
+        finally:
+            cur.close()
+            conn.close()
         flash("If the mobile number exists, the password has been reset and sent by SMS.")
     return render_template("reset.html")
 
@@ -572,13 +605,16 @@ def admin_view(app_id):
     if not session.get("admin"):
         return redirect(url_for("admin_login"))
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT application_no, applicant_name, mobile, dob, gender, "
-                "marital_status, village, block, bank_account, ifsc, doc_path, "
-                "status, submitted_at, decided_at, decided_by "
-                "FROM applications WHERE id = %s", (app_id,))
-    row = cur.fetchone()
-    cur.close(); conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT application_no, applicant_name, mobile, dob, gender, "
+                    "marital_status, village, block, bank_account, ifsc, doc_path, "
+                    "status, submitted_at, decided_at, decided_by "
+                    "FROM applications WHERE id = %s", (app_id,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
     if not row:
         abort(404)
     return render_template("admin_view.html", a=row, app_id=app_id)
@@ -586,28 +622,34 @@ def admin_view(app_id):
 
 @app.route("/admin/approve/<int:app_id>", methods=["POST"])
 def admin_approve(app_id):
-    if not session.get("logged_in"):
+    if not session.get("admin"):
         abort(403)
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("UPDATE applications SET status = 'APPROVED', decided_at = %s "
-                "WHERE id = %s", (datetime.now(), app_id))
-    conn.commit()
-    cur.close(); conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE applications SET status = 'APPROVED', decided_at = %s, decided_by = %s "
+                    "WHERE id = %s", (datetime.now(), session.get("admin_user", "admin"), app_id))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     flash("Application approved.")
     return redirect(url_for("admin_list"))
 
 
 @app.route("/admin/reject/<int:app_id>", methods=["POST"])
 def admin_reject(app_id):
-    if not session.get("logged_in"):
+    if not session.get("admin"):
         abort(403)
     conn = get_db()
-    cur = conn.cursor()
-    cur.execute("UPDATE applications SET status = 'REJECTED', decided_at = %s "
-                "WHERE id = %s", (datetime.now(), app_id))
-    conn.commit()
-    cur.close(); conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE applications SET status = 'REJECTED', decided_at = %s, decided_by = %s "
+                    "WHERE id = %s", (datetime.now(), session.get("admin_user", "admin"), app_id))
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     flash("Application rejected.")
     return redirect(url_for("admin_list"))
 
