@@ -19,7 +19,6 @@ services:
     dockerfilePath: app/Dockerfile
     dockerContext: app
     plan: free
-    preDeployCommand: python -m scripts.init_db
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
