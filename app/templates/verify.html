@@ -21,9 +21,9 @@
   </small>
 </div>
 
-<form method="post" style="max-width: 320px;">
-  <label for="otp">Enter 6-Digit OTP</label>
-  <input type="text" id="otp" name="otp" maxlength="6" value="{{ latest_otp or '' }}" placeholder="Enter 6-digit OTP" style="font-size: 16px; letter-spacing: 2px; font-weight: 600; width: 100%;" required autofocus>
+<form method="post" action="{{ url_for('apply') }}" style="max-width: 320px;">
+  <label for="otp">Enter 6-Digit Verification Code</label>
+  <input type="text" id="otp" name="otp" maxlength="6" value="{{ latest_otp or '' }}" placeholder="Enter 6-digit OTP" style="font-size: 16px; letter-spacing: 2px; font-weight: 600; width: 100%;" autocomplete="off" required autofocus>
   <p style="margin-top: 18px;">
     <button class="btn btn-primary" type="submit" style="width: 100%; padding: 12px; font-size: 15px;">Verify &amp; Continue &rarr;</button>
   </p>
