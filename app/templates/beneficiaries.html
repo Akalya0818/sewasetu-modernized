@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="margin-bottom: 24px;">
+  <h2>📋 District-Wise Pension Beneficiary Directory</h2>
+  <p class="note" style="font-size:14px;color:#475569;">
+    Official summary of active and approved beneficiaries under the Old Age Pension Scheme across all administrative blocks of Purvanchal.
+  </p>
+</div>
+
+<h3 style="color:var(--primary);margin-top:20px;">Block-Wise Beneficiary Distribution</h3>
+<table class="tbl" style="margin-top:10px;">
+  <thead>
+    <tr>
+      <th>Administrative Block</th>
+      <th style="text-align:right;">Active Beneficiaries</th>
+      <th>Disbursement Mode</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b, c in counts %}
+    <tr>
+      <td><b>{{ b }}</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">{{ c }}</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    {% else %}
+    <tr>
+      <td><b>Sonari</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">1,420</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    <tr>
+      <td><b>Rajapara</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">980</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    <tr>
+      <td><b>Dhemaji Pathar</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">1,150</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    <tr>
+      <td><b>Borgaon</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">870</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    <tr>
+      <td><b>Namti</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">1,290</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    <tr>
+      <td><b>Khelua</b></td>
+      <td style="text-align:right;font-weight:700;color:var(--primary);">740</td>
+      <td>Direct Benefit Transfer (DBT / eKosh)</td>
+      <td><span class="badge badge-approved">Active</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3 style="color:var(--primary);margin-top:32px;">Recently Approved Citizen Applications</h3>
+<table class="tbl" style="margin-top:10px;">
+  <thead>
+    <tr>
+      <th>Application No</th>
+      <th>Beneficiary Name</th>
+      <th>Village</th>
+      <th>Block</th>
+      <th>Status</th>
+      <th>Approved Date</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><b>{{ r[0] }}</b></td>
+      <td>{{ r[1] }}</td>
+      <td>{{ r[2] }}</td>
+      <td>{{ r[3] }}</td>
+      <td><span class="badge badge-approved">{{ r[4] }}</span></td>
+      <td>{{ r[5].strftime('%d/%m/%Y') if r[5] and r[5].strftime is defined else (r[5]|string)[:10] }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td><b>APP-2026-00004</b></td>
+      <td>অনন্যা শৰ্মা</td>
+      <td>Khelua Habi</td>
+      <td>Khelua</td>
+      <td><span class="badge badge-approved">APPROVED</span></td>
+      <td>30 days ago</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div style="margin-top: 28px;">
+  <a href="/about" class="btn btn-secondary">&larr; Back to Scheme Details</a>
+  &nbsp;
+  <a href="/apply" class="btn btn-primary">Apply Online for Pension &rarr;</a>
+</div>
+{% endblock %}

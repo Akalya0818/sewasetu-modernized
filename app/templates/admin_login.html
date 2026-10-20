@@ -1,33 +1,49 @@
 {% extends "base.html" %}
 {% block content %}
-<div style="margin-bottom: 24px;">
-  <h2>🛡️ Departmental Administrator Login</h2>
-  <p class="note" style="font-size:14px;color:#475569;">
-    Authorized access for District Social Welfare Officers, Block Development Officers, and Scheme Administrators.
-  </p>
-</div>
-
-<form method="post" style="max-width: 480px;">
-  <div style="margin-bottom: 16px;">
-    <label for="username">Officer Username</label>
-    <input type="text" id="username" name="username" placeholder="Enter administrative username" style="max-width:100%;" required>
+<div class="auth-container">
+  <div class="auth-header">
+    <h2>🛡️ Departmental Administrator Login</h2>
+    <p class="note" style="font-size: 14px; color: #475569; margin: 0; line-height: 1.5;">
+      Authorized access for District Social Welfare Officers, Block Development Officers, and Scheme Evaluators.
+    </p>
   </div>
 
-  <div style="margin-bottom: 20px;">
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" placeholder="Enter administrative password" style="max-width:100%;" required>
+  <div class="auth-card">
+    <form method="post">
+      <div class="form-group">
+        <label for="username">Officer Username</label>
+        <input type="text" id="username" name="username" placeholder="assessor_admin" required autofocus>
+        <small class="helper-text">Official administrative username or assessor account.</small>
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="Enter administrative password" required>
+        <small class="helper-text">Official evaluator security credential.</small>
+      </div>
+
+      <p style="margin: 24px 0 0 0;">
+        <button class="btn btn-primary btn-submit" type="submit">
+          Sign In to Admin Console &rarr;
+        </button>
+      </p>
+    </form>
+
+    <div class="info-callout">
+      <div style="font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+        <span>💡</span> <span>Assessor / Evaluator Credentials:</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.6; color: #0369A1;">
+        <div><b>Username:</b> <code>assessor_admin</code></div>
+        <div style="margin-top: 4px; word-break: break-all;"><b>Password:</b> <code>FJFZU49EMDmeG9YDuse0hqdRKBWOqGs3l4BBS+cUZ08</code></div>
+      </div>
+    </div>
   </div>
 
-  <p style="margin-top: 24px;">
-    <button class="btn btn-primary" type="submit" style="padding: 12px 28px; font-size: 15px;">Sign In to Admin Console &rarr;</button>
-  </p>
-</form>
-
-<div class="info-callout" style="max-width: 480px; margin-top: 28px;">
-  <b>💡 Assessor / Evaluator Credentials:</b>
-  <p style="margin: 4px 0 0 0; font-size: 13px;">
-    <b>Username:</b> <code>admin</code> (or <code>assessor_admin</code> on Render)<br>
-    <b>Password:</b> <code>dev-admin-password-change-in-production</code> (or your Render environment password)
-  </p>
+  <div style="text-align: center; margin-top: 20px;">
+    <a href="/" style="color: var(--primary); font-size: 13.5px; text-decoration: none; font-weight: 500;">
+      &larr; Back to Public Portal
+    </a>
+  </div>
 </div>
 {% endblock %}
