@@ -22,7 +22,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: APP_ENV
-        value: production
+        value: development
       - key: SECRET_KEY
         generateValue: true
       - key: ADMIN_USERNAME

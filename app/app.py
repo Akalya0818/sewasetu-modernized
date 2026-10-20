@@ -137,17 +137,72 @@ except Exception:
     pass
 
 
+_DB_TABLES_INITIALIZED = False
+
+
+def init_tables_if_needed(conn):
+    global _DB_TABLES_INITIALIZED
+    if _DB_TABLES_INITIALIZED:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS applications (
+                id              SERIAL PRIMARY KEY,
+                application_no  VARCHAR(20),
+                applicant_name  VARCHAR(100),
+                mobile          VARCHAR(15),
+                dob             DATE,
+                gender          VARCHAR(10),
+                marital_status  VARCHAR(20),
+                husband_name    VARCHAR(100),
+                husband_employer VARCHAR(100),
+                village         VARCHAR(100),
+                block           VARCHAR(50),
+                bank_account    VARCHAR(30),
+                ifsc            VARCHAR(15),
+                doc_path        VARCHAR(200),
+                status          VARCHAR(20) DEFAULT 'PENDING',
+                submitted_at    TIMESTAMP,
+                decided_at      TIMESTAMP,
+                decided_by      VARCHAR(50)
+            );
+            CREATE TABLE IF NOT EXISTS portal_users (
+                mobile        VARCHAR(15) PRIMARY KEY,
+                password_hash VARCHAR(80)
+            );
+            CREATE TABLE IF NOT EXISTS otps (
+                id         SERIAL PRIMARY KEY,
+                mobile     VARCHAR(15),
+                code       VARCHAR(6),
+                created_at TIMESTAMP
+            );
+        """)
+        seed_path = os.path.join(BASE_DIR, "synthetic_seed.sql")
+        if os.path.exists(seed_path):
+            with open(seed_path, "r", encoding="utf-8") as f:
+                cur.execute(f.read())
+        conn.commit()
+        cur.close()
+        _DB_TABLES_INITIALIZED = True
+    except Exception as e:
+        app.logger.warning("init_tables_if_needed: %s", e)
+
+
 def get_db():
     db_url = os.environ.get("DATABASE_URL")
     if db_url:
-        return psycopg2.connect(db_url)
-    return psycopg2.connect(
-        host=os.environ.get("DB_HOST", config.get("database", "host")),
-        port=int(os.environ.get("DB_PORT", config.get("database", "port"))),
-        dbname=os.environ.get("DB_NAME", config.get("database", "name")),
-        user=os.environ.get("DB_USER", config.get("database", "user")),
-        password=DB_PASSWORD,
-    )
+        conn = psycopg2.connect(db_url)
+    else:
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST", config.get("database", "host")),
+            port=int(os.environ.get("DB_PORT", config.get("database", "port"))),
+            dbname=os.environ.get("DB_NAME", config.get("database", "name")),
+            user=os.environ.get("DB_USER", config.get("database", "user")),
+            password=DB_PASSWORD,
+        )
+    init_tables_if_needed(conn)
+    return conn
 
 
 def sanitize(value, maxlen=100):
@@ -355,12 +410,19 @@ def apply():
             flash("Something went wrong. Please try again.")
             return render_template("apply.html", captcha_q=make_captcha())
         code = str(random.randint(100000, 999999))
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO otps (mobile, code, created_at) VALUES (%s, %s, %s)",
-                    (mobile, code, datetime.now()))
-        conn.commit()
-        cur.close(); conn.close()
+        try:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute("INSERT INTO otps (mobile, code, created_at) VALUES (%s, %s, %s)",
+                        (mobile, code, datetime.now()))
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            app.logger.error("Failed to insert OTP: %s", e)
+            flash("Database temporarily unavailable. Please try again.")
+            return render_template("apply.html", captcha_q=make_captcha())
+
         send_sms(mobile, "Your Sewa Setu OTP is %s. Valid for 5 minutes." % code)
         session.permanent = True
         session["apply_mobile"] = mobile

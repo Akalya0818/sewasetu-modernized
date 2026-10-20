@@ -3,6 +3,11 @@
 <div class="steps"><b>Step 1 of 6:</b> Mobile Verification</div>
 <h2>Enter OTP</h2>
 <p class="note">An OTP has been sent to {{ mobile }}.</p>
+<div style="background:#e8f4fd;border:1px solid #1a3c6e;border-radius:4px;padding:10px 14px;margin:15px 0;">
+  <p style="margin:0;font-size:14px;color:#1a3c6e;">
+    ℹ️ <b>Test & Assessment Environment:</b> This portal uses a simulated SMS gateway. View the generated OTP code live at the <a href="{{ url_for('gateway_proxy') }}" target="_blank" style="color:#1a3c6e;font-weight:bold;text-decoration:underline;">PurvSMS Gateway Console (/__gateway/)</a>.
+  </p>
+</div>
 <form method="post">
   <label>OTP</label>
   <input type="text" name="otp" maxlength="6" style="max-width:160px">
