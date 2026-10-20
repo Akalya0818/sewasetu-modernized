@@ -1,12 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>About the Scheme</h2>
-<p>The Old Age Pension Scheme is implemented by the Department of Social Welfare,
-Government of Purvanchal, under the State Social Assistance Programme.</p>
-<p>Eligibility: residents of Purvanchal above 60 years of age. One application per
-eligible citizen. Applications are processed within 15 days as per the Purvanchal
-Right to Public Services Act; applications not processed within the statutory
-period stand approved (deemed approval).</p>
-<p>Scheme guidelines: <a href="/downloads/oap-guidelines-2023.pdf">OAP Guidelines 2023 (PDF)</a></p>
-<p>Beneficiary list: <a href="http://swd.purvanchal.nic.in/oap/beneficiary-list">District-wise beneficiary list</a></p>
+<h2>About the Old Age Pension Scheme</h2>
+<p style="font-size: 15px; color: #334155;">
+  The Old Age Pension Scheme is implemented by the Department of Social Welfare, Government of Purvanchal, under the State Social Assistance Programme and National Social Assistance Scheme.
+</p>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 24px 0;">
+  <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-top:3px solid var(--primary); border-radius:8px; padding:18px;">
+    <h3 style="margin-top:0; font-size:16px; color:var(--primary);">🎯 Statutory Eligibility</h3>
+    <ul style="margin:8px 0 0 0; padding-left:20px; font-size:13.5px; color:#475569; line-height:1.7;">
+      <li>Permanent resident of Purvanchal.</li>
+      <li>Minimum age of <b>60 years</b> or above.</li>
+      <li>Individual applicant (one application per citizen).</li>
+    </ul>
+  </div>
+
+  <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-top:3px solid #138808; border-radius:8px; padding:18px;">
+    <h3 style="margin-top:0; font-size:16px; color:#138808;">⚖️ Statutory Deemed Approval</h3>
+    <p style="margin:8px 0 0 0; font-size:13.5px; color:#475569; line-height:1.6;">
+      Applications are processed strictly within <b>15 days</b> as per the Purvanchal Right to Public Services Act. Applications not decided within this statutory period stand approved automatically.
+    </p>
+  </div>
+</div>
+
+<h3>Official Documents & References</h3>
+<ul style="font-size: 14px; line-height: 1.8; color: #334155;">
+  <li>Scheme guidelines: <a href="/downloads/oap-guidelines-2023.pdf" style="color:var(--primary);font-weight:600;">OAP Guidelines 2023 (PDF)</a></li>
+  <li>Beneficiary list: <a href="http://swd.purvanchal.nic.in/oap/beneficiary-list" style="color:var(--primary);font-weight:600;">District-wise beneficiary list</a></li>
+</ul>
+
+<div class="info-callout">
+  <b>Administrative Jurisdiction:</b> Scheme coverage extends across Sonari, Rajapara, Dhemaji Pathar, Borgaon, Namti, and Khelua blocks.
+</div>
 {% endblock %}

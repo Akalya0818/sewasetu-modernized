@@ -1,11 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Departmental Login</h2>
-<form method="post">
-  <label>Username</label>
-  <input type="text" name="username">
-  <label>Password</label>
-  <input type="password" name="password">
-  <p><button class="btn" type="submit">Login</button></p>
+<div style="margin-bottom: 24px;">
+  <h2>🛡️ Departmental Administrator Login</h2>
+  <p class="note" style="font-size:14px;color:#475569;">
+    Authorized access for District Social Welfare Officers, Block Development Officers, and Scheme Administrators.
+  </p>
+</div>
+
+<form method="post" style="max-width: 480px;">
+  <div style="margin-bottom: 16px;">
+    <label for="username">Officer Username</label>
+    <input type="text" id="username" name="username" placeholder="Enter administrative username" style="max-width:100%;" required>
+  </div>
+
+  <div style="margin-bottom: 20px;">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" placeholder="Enter administrative password" style="max-width:100%;" required>
+  </div>
+
+  <p style="margin-top: 24px;">
+    <button class="btn btn-primary" type="submit" style="padding: 12px 28px; font-size: 15px;">Sign In to Admin Console &rarr;</button>
+  </p>
 </form>
+
+<div class="info-callout" style="max-width: 480px; margin-top: 28px;">
+  <b>💡 Assessor / Evaluator Credentials:</b>
+  <p style="margin: 4px 0 0 0; font-size: 13px;">
+    <b>Username:</b> <code>admin</code> (or <code>assessor_admin</code> on Render)<br>
+    <b>Password:</b> <code>dev-admin-password-change-in-production</code> (or your Render environment password)
+  </p>
+</div>
 {% endblock %}

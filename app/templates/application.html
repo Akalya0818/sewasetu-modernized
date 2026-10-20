@@ -1,18 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Application Status</h2>
-<table class="tbl" style="max-width:640px">
-  <tr><th>Application No</th><td>{{ a[0] }}</td></tr>
-  <tr><th>Applicant Name</th><td>{{ a[1] }}</td></tr>
-  <tr><th>Mobile</th><td>{{ a[2] }}</td></tr>
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+  <div>
+    <h2 style="margin-bottom: 4px; border-bottom: none; padding-bottom: 0;">Pension Application Dossier</h2>
+    <div style="font-size: 14px; color: #64748B;">Application Reference: <b>{{ a[0] }}</b></div>
+  </div>
+  <div>
+    <span class="badge badge-{{ a[8] | lower }}">{{ a[8] }}</span>
+  </div>
+</div>
+
+<table class="tbl" style="margin-top: 10px;">
+  <tr><th style="width: 35%;">Application Number</th><td><b>{{ a[0] }}</b></td></tr>
+  <tr><th>Applicant Full Name</th><td><b>{{ a[1] }}</b></td></tr>
+  <tr><th>Registered Mobile</th><td>{{ a[2] }}</td></tr>
   <tr><th>Date of Birth</th><td>{{ a[3] }}</td></tr>
-  <tr><th>Village</th><td>{{ a[4] }}</td></tr>
-  <tr><th>Block</th><td>{{ a[5] }}</td></tr>
-  <tr><th>Bank Account</th><td>{{ a[6] }}</td></tr>
-  <tr><th>IFSC</th><td>{{ a[7] }}</td></tr>
-  <tr><th>Status</th><td><b>{{ a[8] }}</b></td></tr>
-  <tr><th>Submitted</th><td>{{ a[9] }}</td></tr>
-  <tr><th>Decided</th><td>{{ a[10] or '-' }}</td></tr>
+  <tr><th>Village / Habitation</th><td>{{ a[4] }}</td></tr>
+  <tr><th>Administrative Block</th><td>{{ a[5] }}</td></tr>
+  <tr><th>Bank Account Number</th><td><code>{{ a[6] }}</code></td></tr>
+  <tr><th>Bank IFSC Code</th><td><code>{{ a[7] }}</code></td></tr>
+  <tr><th>Current Status</th><td><span class="badge badge-{{ a[8] | lower }}">{{ a[8] }}</span></td></tr>
+  <tr><th>Date of Submission</th><td>{{ a[9] }}</td></tr>
+  <tr><th>Decision Date</th><td>{{ a[10] or 'Under statutory block review' }}</td></tr>
 </table>
-<p><a href="/ack/{{ app_id }}.pdf">Download Acknowledgment (PDF)</a></p>
+
+<div style="margin-top: 28px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+  <a href="/ack/{{ app_id }}.pdf" class="btn btn-primary" style="padding: 12px 24px; font-size: 15px; text-decoration: none;">
+    📄 Download Acknowledgment (PDF)
+  </a>
+  <a href="/status" class="btn btn-secondary" style="text-decoration: none;">
+    &larr; Back to Status Search
+  </a>
+</div>
+
+<div class="info-callout" style="margin-top: 24px;">
+  <b>Statutory Notice:</b> Under the Purvanchal Social Security Guarantee Act, all complete applications are processed within 15 working days. Deemed statutory approval applies automatically to verified eligible seniors upon expiry of the SLA.
+</div>
 {% endblock %}

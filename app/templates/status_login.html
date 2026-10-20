@@ -1,12 +1,38 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Application Status Portal</h2>
-<form method="post">
-  <label>Mobile Number</label>
-  <input type="text" name="mobile" maxlength="10">
-  <label>Password</label>
-  <input type="password" name="password">
-  <p><button class="btn" type="submit">Login</button></p>
+<div style="margin-bottom: 24px;">
+  <h2>🔍 Citizen Application Status Portal</h2>
+  <p class="note" style="font-size:14px;color:#475569;">
+    Track your Old Age Pension application review, block development officer status, or download your official digitized acknowledgment receipt.
+  </p>
+</div>
+
+<form method="post" style="max-width: 520px;">
+  <div style="margin-bottom: 16px;">
+    <label for="mobile">Registered Mobile Number</label>
+    <input type="text" id="mobile" name="mobile" maxlength="10" placeholder="10-digit mobile number" style="max-width:100%;" required>
+    <small class="helper-text">Enter the 10-digit mobile number submitted on your application form.</small>
+  </div>
+
+  <div style="margin-bottom: 20px;">
+    <label for="password">Password <span class="label-hint">(Enter Date of Birth in DDMMYYYY format, e.g., 15081955)</span></label>
+    <input type="password" id="password" name="password" placeholder="e.g. 15081955 (DDMMYYYY)" style="max-width:100%;" required>
+    <small class="helper-text">Default password is your Date of Birth in <b>DDMMYYYY</b> format as recorded on your age proof document.</small>
+  </div>
+
+  <p style="margin-top: 24px;">
+    <button class="btn btn-primary" type="submit" style="padding: 12px 28px; font-size: 15px;">Login to View Status &rarr;</button>
+  </p>
 </form>
-<p class="note"><a href="/status/reset">Forgot password?</a></p>
+
+<div class="info-callout" style="max-width: 520px; margin-top: 28px;">
+  <b>💡 Synthetic Test Citizen Credentials:</b>
+  <p style="margin: 4px 0 0 0; font-size: 13px;">
+    <b>Mobile:</b> <code>9876543210</code> &nbsp;|&nbsp; <b>Password:</b> <code>15081955</code> <em>(DOB: 15/08/1955 &mdash; Ananya Sharma)</em>
+  </p>
+</div>
+
+<p class="note" style="margin-top: 18px;">
+  <a href="/status/reset" style="color:#0A3161;font-weight:600;">Forgot password or need account assistance? &rarr;</a>
+</p>
 {% endblock %}

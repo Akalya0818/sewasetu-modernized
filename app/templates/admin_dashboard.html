@@ -1,24 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Dashboard</h2>
-<p><a href="/admin/applications?status=PENDING">Pending</a> |
-<a href="/admin/applications?status=APPROVED">Approved</a> |
-<a href="/admin/applications?status=REJECTED">Rejected</a> |
-<a href="/admin/applications?status=DEEMED_APPROVED">Deemed Approved</a></p>
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+  <div>
+    <h2 style="margin-bottom: 4px; border-bottom: none; padding-bottom: 0;">Dashboard</h2>
+    <div style="font-size: 13.5px; color: #64748B;">Department of Social Welfare &middot; Purvanchal State Administration</div>
+  </div>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <a href="/admin/applications?status=PENDING" class="btn btn-primary" style="padding: 7px 14px; font-size: 13px;">Pending</a>
+    <a href="/admin/applications?status=APPROVED" class="btn btn-success" style="padding: 7px 14px; font-size: 13px;">Approved</a>
+    <a href="/admin/applications?status=REJECTED" class="btn" style="background:#DC2626; padding: 7px 14px; font-size: 13px;">Rejected</a>
+    <a href="/admin/applications?status=DEEMED_APPROVED" class="btn btn-secondary" style="padding: 7px 14px; font-size: 13px;">Deemed Approved</a>
+  </div>
+</div>
 
-<h3>Applications by Status</h3>
-<table class="tbl" style="max-width:400px">
-{% for s, c in by_status %}
-<tr><td>{{ s }}</td><td style="text-align:right">{{ c }}</td></tr>
-{% endfor %}
-</table>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-top: 20px;">
+  <!-- Column 1: Status Breakdown -->
+  <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; box-shadow: var(--shadow-sm);">
+    <h3 style="margin-top: 0; color: var(--primary);">Applications by Status</h3>
+    <table class="tbl" style="margin-top: 10px;">
+      {% for s, c in by_status %}
+      <tr>
+        <td>
+          <a href="/admin/applications?status={{ s }}" style="color:var(--primary); font-weight:600; text-decoration:none;">
+            {{ s }}
+          </a>
+        </td>
+        <td style="text-align: right; font-weight: 700; color: #1E293B;">{{ c }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
 
-<h3 style="color:#a33">Pending beyond {{ sla }}-day SLA: {{ overdue }}</h3>
+  <!-- Column 2: Block Breakdown & SLA -->
+  <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 8px; padding: 20px; box-shadow: var(--shadow-sm);">
+    <div style="background: #FEF2F2; border: 1.5px solid #FCA5A5; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px;">
+      <h3 style="margin: 0; font-size: 15px; color: #B91C1C;">Pending beyond {{ sla }}-day SLA: {{ overdue }}</h3>
+      <div style="font-size: 12.5px; color: #7F1D1D; margin-top: 4px;">Applications past the 15-day SLA boundary are subject to nightly statutory deemed approval.</div>
+    </div>
 
-<h3>Pending by Block</h3>
-<table class="tbl" style="max-width:400px">
-{% for b, c in by_block %}
-<tr><td>{{ b }}</td><td style="text-align:right">{{ c }}</td></tr>
-{% endfor %}
-</table>
+    <h3 style="margin-top: 16px; color: var(--primary);">Pending by Block</h3>
+    <table class="tbl" style="margin-top: 10px;">
+      {% for b, c in by_block %}
+      <tr>
+        <td><b>{{ b }}</b></td>
+        <td style="text-align: right; font-weight: 700; color: #1E293B;">{{ c }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
 {% endblock %}
