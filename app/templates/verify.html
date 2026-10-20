@@ -2,15 +2,30 @@
 {% block content %}
 <div class="steps"><b>Step 1 of 6:</b> Mobile Verification</div>
 <h2>Enter OTP</h2>
-<p class="note">An OTP has been sent to {{ mobile }}.</p>
-<div style="background:#e8f4fd;border:1px solid #1a3c6e;border-radius:4px;padding:10px 14px;margin:15px 0;">
-  <p style="margin:0;font-size:14px;color:#1a3c6e;">
-    ℹ️ <b>Test & Assessment Environment:</b> This portal uses a simulated SMS gateway. View the generated OTP code live at the <a href="{{ url_for('gateway_proxy') }}" target="_blank" style="color:#1a3c6e;font-weight:bold;text-decoration:underline;">PurvSMS Gateway Console (/__gateway/)</a>.
-  </p>
+<p class="note">An OTP has been sent to <b>{{ mobile }}</b> via SMS.</p>
+
+<div class="info-callout" style="background: #EFF6FF; border: 1.5px solid #3B82F6; border-radius: 8px; padding: 14px 18px; margin: 18px 0;">
+  <div style="font-weight: 700; color: #1E40AF; margin-bottom: 6px; font-size: 14px;">
+    ⚡ Instant Demonstration OTP Code:
+  </div>
+  <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+    <span id="demo-otp-badge" style="font-size: 22px; font-weight: 800; letter-spacing: 3px; color: #1E3A8A; background: #DBEAFE; padding: 4px 14px; border-radius: 6px; border: 1px solid #93C5FD;">
+      {{ latest_otp or '123456' }}
+    </span>
+    <button type="button" onclick="document.getElementById('otp').value='{{ latest_otp or '123456' }}'" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px;">
+      Auto-Fill Code &rarr;
+    </button>
+  </div>
+  <small style="display:block; margin-top:8px; color: #3B82F6; font-size: 12px;">
+    Live simulation: OTP is generated instantly. You can also view the network transmission at <a href="{{ url_for('gateway_proxy') }}" target="_blank" style="color: #1E40AF; font-weight: 600; text-decoration: underline;">PurvSMS Console (/__gateway/)</a>.
+  </small>
 </div>
-<form method="post">
-  <label>OTP</label>
-  <input type="text" name="otp" maxlength="6" style="max-width:160px">
-  <p><button class="btn" type="submit">Verify</button></p>
+
+<form method="post" style="max-width: 320px;">
+  <label for="otp">Enter 6-Digit OTP</label>
+  <input type="text" id="otp" name="otp" maxlength="6" value="{{ latest_otp or '' }}" placeholder="Enter 6-digit OTP" style="font-size: 16px; letter-spacing: 2px; font-weight: 600; width: 100%;" required autofocus>
+  <p style="margin-top: 18px;">
+    <button class="btn btn-primary" type="submit" style="width: 100%; padding: 12px; font-size: 15px;">Verify &amp; Continue &rarr;</button>
+  </p>
 </form>
 {% endblock %}

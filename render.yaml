@@ -14,7 +14,7 @@
 
 services:
   - type: web
-    name: sewasetu-portal
+    name: b4b-eval-portal
     runtime: docker
     dockerfilePath: app/Dockerfile
     dockerContext: app
