@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS applications (
     decided_at      TIMESTAMP,
     decided_by      VARCHAR(50)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no);
 
 -- Status portal accounts (created at submission time)
 CREATE TABLE IF NOT EXISTS portal_users (

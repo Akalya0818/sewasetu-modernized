@@ -188,10 +188,13 @@ def init_tables_if_needed(conn):
                 created_at TIMESTAMP
             );
         """)
+        conn.commit()
         try:
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no)")
+            conn.commit()
         except Exception:
-            pass
+            conn.rollback()
+            cur = conn.cursor()
 
         # Only seed synthetic data on fresh, empty databases
         cur.execute("SELECT count(*) FROM applications")

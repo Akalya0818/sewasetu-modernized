@@ -56,6 +56,7 @@ def init_database(conn=None):
         if os.path.exists(schema_path):
             with open(schema_path, "r", encoding="utf-8") as f:
                 cur.execute(f.read())
+        conn.commit()
 
         # Attempt to ensure uniqueness index safely on application_no
         try:

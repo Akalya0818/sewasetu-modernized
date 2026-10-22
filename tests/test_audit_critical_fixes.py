@@ -293,3 +293,58 @@ def test_admin_authentication_and_authorization(client):
     }, follow_redirects=False)
     assert login_resp.status_code == 302
     assert "/admin/dashboard" in login_resp.headers.get("Location", "")
+
+
+def test_initialization_with_existing_duplicates_handled_safely(tmp_path):
+    """
+    Verify that when database contains existing duplicate application numbers,
+    both init_database and init_tables_if_needed handle the index collision
+    gracefully, preserve all records, and leave the connection in a healthy state.
+    """
+    db_file = str(tmp_path / "test_existing_dups.db")
+    raw_conn = sqlite3.connect(db_file)
+    raw_conn.execute("""
+        CREATE TABLE applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            application_no VARCHAR(20),
+            applicant_name VARCHAR(100),
+            mobile VARCHAR(15),
+            dob DATE,
+            gender VARCHAR(10),
+            marital_status VARCHAR(20),
+            husband_name VARCHAR(100),
+            husband_employer VARCHAR(100),
+            village VARCHAR(100),
+            block VARCHAR(50),
+            bank_account VARCHAR(30),
+            ifsc VARCHAR(15),
+            doc_path VARCHAR(200),
+            status VARCHAR(20) DEFAULT 'PENDING',
+            submitted_at TIMESTAMP,
+            decided_at TIMESTAMP,
+            decided_by VARCHAR(50)
+        )
+    """)
+    raw_conn.execute("INSERT INTO applications (application_no, applicant_name) VALUES ('APP-2026-00001', 'Duplicate 1')")
+    raw_conn.execute("INSERT INTO applications (application_no, applicant_name) VALUES ('APP-2026-00001', 'Duplicate 2')")
+    raw_conn.commit()
+
+    wrapped = SqliteConnectionWrapper(raw_conn)
+
+    # 1. init_database should not crash and preserve duplicates
+    init_database(conn=wrapped)
+    cur = wrapped.cursor()
+    cur.execute("SELECT count(*) FROM applications WHERE application_no = 'APP-2026-00001'")
+    assert cur.fetchone()[0] == 2
+
+    # 2. init_tables_if_needed should handle index exception and keep connection usable
+    from app import init_tables_if_needed
+    import app as app_module
+    app_module._DB_TABLES_INITIALIZED = False
+    init_tables_if_needed(wrapped)
+
+    cur = wrapped.cursor()
+    cur.execute("SELECT count(*) FROM applications WHERE application_no = 'APP-2026-00001'")
+    assert cur.fetchone()[0] == 2
+    raw_conn.close()
+
