@@ -188,10 +188,19 @@ def init_tables_if_needed(conn):
                 created_at TIMESTAMP
             );
         """)
-        seed_path = os.path.join(BASE_DIR, "synthetic_seed.sql")
-        if os.path.exists(seed_path):
-            with open(seed_path, "r", encoding="utf-8") as f:
-                cur.execute(f.read())
+        try:
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no)")
+        except Exception:
+            pass
+
+        # Only seed synthetic data on fresh, empty databases
+        cur.execute("SELECT count(*) FROM applications")
+        app_count = cur.fetchone()[0]
+        if app_count == 0:
+            seed_path = os.path.join(BASE_DIR, "synthetic_seed.sql")
+            if os.path.exists(seed_path):
+                with open(seed_path, "r", encoding="utf-8") as f:
+                    cur.execute(f.read())
         conn.commit()
         cur.close()
         _DB_TABLES_INITIALIZED = True
@@ -499,11 +508,18 @@ def apply():
             conn.close()
             if (row and (row[0] == otp_val or otp_val == "123456")) or (latest_otp and otp_val == latest_otp):
                 if row:
-                    age = (datetime.now() - row[1]).total_seconds()
-                    if age > OTP_VALIDITY_SECONDS:
-                        app.logger.warning("otp expired mobile=%s age=%ds" % (mobile, int(age)))
-                        flash("OTP expired. Please request a new OTP.")
-                        return render_template("apply.html", captcha_q=make_captcha())
+                    row_time = row[1]
+                    if isinstance(row_time, str):
+                        try:
+                            row_time = datetime.fromisoformat(row_time)
+                        except Exception:
+                            pass
+                    if isinstance(row_time, datetime):
+                        age = (datetime.now() - row_time).total_seconds()
+                        if age > OTP_VALIDITY_SECONDS:
+                            app.logger.warning("otp expired mobile=%s age=%ds" % (mobile, int(age)))
+                            flash("OTP expired. Please request a new OTP.")
+                            return render_template("apply.html", captcha_q=make_captcha())
                 session["verified_mobile"] = mobile
                 return redirect(url_for("form_step", step=1))
             flash("Invalid OTP.")
@@ -572,11 +588,18 @@ def verify():
         cur.close(); conn.close()
         if (row and (row[0] == code or code == "123456")) or (latest_otp and code == latest_otp):
             if row:
-                age = (datetime.now() - row[1]).total_seconds()
-                if age > OTP_VALIDITY_SECONDS:
-                    app.logger.warning("otp expired mobile=%s age=%ds" % (mobile, int(age)))
-                    flash("OTP expired. Please request a new OTP.")
-                    return redirect(url_for("apply"))
+                row_time = row[1]
+                if isinstance(row_time, str):
+                    try:
+                        row_time = datetime.fromisoformat(row_time)
+                    except Exception:
+                        pass
+                if isinstance(row_time, datetime):
+                    age = (datetime.now() - row_time).total_seconds()
+                    if age > OTP_VALIDITY_SECONDS:
+                        app.logger.warning("otp expired mobile=%s age=%ds" % (mobile, int(age)))
+                        flash("OTP expired. Please request a new OTP.")
+                        return redirect(url_for("apply"))
             session["verified_mobile"] = mobile
             return redirect(url_for("form_step", step=1))
         flash("Invalid OTP.")
@@ -913,7 +936,7 @@ def status_login():
                 matched_mobile = u_mob
                 break
 
-        # 2. Check applications table by mobile or application_no
+        # 2. Check applications table by mobile or application_no and verify DOB / password
         if not authenticated:
             cur.execute(
                 """SELECT id, mobile, dob, application_no 
@@ -923,69 +946,38 @@ def status_login():
                 (clean_mobile, raw_identifier, raw_identifier, clean_id)
             )
             for app_id, app_mob, app_dob, app_no in cur.fetchall():
-                authenticated = True
-                matched_app_id = app_id
-                matched_mobile = app_mob
-                break
+                target_dob = None
+                if hasattr(app_dob, 'strftime'):
+                    target_dob = app_dob
+                elif isinstance(app_dob, str) and len(app_dob) >= 10:
+                    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                        try:
+                            target_dob = datetime.strptime(app_dob[:10], fmt).date()
+                            break
+                        except ValueError:
+                            pass
 
-        # 3. Flexible on-the-fly provisioning for any new 10-digit mobile
-        if not authenticated and len(clean_mobile) == 10 and clean_mobile.isdigit():
-            app_no = new_application_no()
-            now = datetime.now()
-            chosen_dob = "1958-08-15"
-            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%d%m%Y", "%Y%m%d"):
-                try:
-                    chosen_dob = datetime.strptime(raw_password, fmt).strftime("%Y-%m-%d")
-                    break
-                except ValueError:
-                    pass
-
-            try:
-                cur.execute(
-                    """INSERT INTO applications
-                       (application_no, applicant_name, mobile, dob, gender, marital_status,
-                        village, block, bank_account, ifsc, doc_path, status, submitted_at)
-                       VALUES (%s, %s, %s, %s, 'Female', 'Widowed', 'Sonari Gaon', 'Sonari',
-                               '123456789012', 'SBIN0001234', 'uploads/sample1.pdf', 'PENDING', %s)
-                       RETURNING id""",
-                    (app_no, f"Citizen Applicant ({clean_mobile[-4:]})", clean_mobile, chosen_dob, now)
-                )
-                new_id = cur.fetchone()[0]
-                authenticated = True
-                matched_app_id = new_id
-                matched_mobile = clean_mobile
-                try:
-                    cur.execute("INSERT INTO portal_users (mobile, password_hash) VALUES (%s, %s)",
-                                (clean_mobile, hash_password("15081955")))
-                except Exception:
-                    pass
-                conn.commit()
-            except Exception:
-                try:
-                    conn.rollback()
-                    cur.execute(
-                        """INSERT INTO applications
-                           (application_no, applicant_name, mobile, dob, gender, marital_status,
-                            village, block, bank_account, ifsc, doc_path, status, submitted_at)
-                           VALUES (%s, %s, %s, %s, 'Female', 'Widowed', 'Sonari Gaon', 'Sonari',
-                                   '123456789012', 'SBIN0001234', 'uploads/sample1.pdf', 'PENDING', %s)""",
-                        (app_no, f"Citizen Applicant ({clean_mobile[-4:]})", clean_mobile, chosen_dob, now)
-                    )
-                    conn.commit()
-                    cur.execute("SELECT id FROM applications WHERE mobile = %s ORDER BY id DESC LIMIT 1", (clean_mobile,))
-                    r = cur.fetchone()
-                    if r:
+                if target_dob:
+                    ddmmyyyy = target_dob.strftime("%d%m%Y")
+                    iso = target_dob.strftime("%Y-%m-%d")
+                    slash = target_dob.strftime("%d/%m/%Y")
+                    dash = target_dob.strftime("%d-%m-%Y")
+                    if (ddmmyyyy in candidate_passwords or
+                        iso in candidate_passwords or
+                        slash in candidate_passwords or
+                        dash in candidate_passwords or
+                        hash_password(ddmmyyyy) in candidate_hashes or
+                        (raw_password in candidate_passwords and hash_password(raw_password) in candidate_hashes)):
                         authenticated = True
-                        matched_app_id = r[0]
-                        matched_mobile = clean_mobile
-                except Exception:
-                    pass
+                        matched_app_id = app_id
+                        matched_mobile = app_mob
+                        break
 
         if authenticated:
             session["logged_in"] = True
             session["portal_mobile"] = matched_mobile
             if not matched_app_id:
-                cur.execute("SELECT id FROM applications WHERE mobile = %s ORDER BY submitted_at DESC LIMIT 1",
+                cur.execute("SELECT id FROM applications WHERE mobile = %s ORDER BY submitted_at DESC, id DESC LIMIT 1",
                             (matched_mobile,))
                 r = cur.fetchone()
                 if r:
@@ -999,9 +991,19 @@ def status_login():
             flash("No application found for this account.")
             return redirect(url_for("status_login"))
 
+        # Strictly read-only: Check whether the identifier exists to provide a helpful user response
+        cur.execute(
+            "SELECT count(*) FROM applications WHERE mobile = %s OR mobile = %s OR UPPER(application_no) = UPPER(%s) OR UPPER(application_no) = UPPER(%s)",
+            (clean_mobile, raw_identifier, raw_identifier, clean_id)
+        )
+        has_app = cur.fetchone()[0] > 0
         cur.close()
         conn.close()
-        flash("Please enter a valid 10-digit mobile number or application number.")
+
+        if has_app:
+            flash("Incorrect Date of Birth / password. Please enter your Date of Birth in DDMMYYYY format (e.g. 15081955).")
+        else:
+            flash("No registered application found for the provided details. Please check your mobile or application number, or apply online.")
 
     return render_template("status_login.html")
 

@@ -15,10 +15,17 @@ class SqliteCursorWrapper:
         self.cursor = cursor
 
     def execute(self, query, params=None):
+        import re
         # Convert Postgres %s placeholders to SQLite ? placeholders
         q = query.replace('%s', '?')
-        # SQLite compatibility for RETURNING id
+        # Convert Postgres syntax to SQLite syntax for isolated testing
+        q = re.sub(r"NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*days'", r"datetime('now', '-\1 days')", q, flags=re.IGNORECASE)
+        q = re.sub(r"NOW\(\)", r"datetime('now')", q, flags=re.IGNORECASE)
+        q = re.sub(r"\bSERIAL PRIMARY KEY\b", "INTEGER PRIMARY KEY AUTOINCREMENT", q, flags=re.IGNORECASE)
         if params is None:
+            stmts = [s.strip() for s in q.split(';') if s.strip()]
+            if len(stmts) > 1:
+                return self.cursor.executescript(q)
             return self.cursor.execute(q)
         # Convert any date/datetime/string objects as needed
         return self.cursor.execute(q, params)
@@ -81,6 +88,7 @@ CREATE TABLE IF NOT EXISTS applications (
     decided_at      TIMESTAMP,
     decided_by      VARCHAR(50)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no);
 
 CREATE TABLE IF NOT EXISTS portal_users (
     mobile        VARCHAR(15) PRIMARY KEY,

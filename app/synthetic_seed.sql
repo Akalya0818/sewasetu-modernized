@@ -5,30 +5,49 @@
 -- It contains ZERO real citizen records or personally identifiable information.
 -- ==============================================================================
 
+-- 1. Eligible pending applicant (age 70, submitted 20 days ago, past 15-day SLA -> eligible for deemed approval)
 INSERT INTO applications (
     application_no, applicant_name, mobile, dob, gender, marital_status,
     husband_name, husband_employer, village, block, bank_account, ifsc,
     doc_path, status, submitted_at
-) VALUES
--- 1. Eligible pending applicant (age 70, submitted 20 days ago, past 15-day SLA -> eligible for deemed approval)
-('APP-2026-00001', 'Ananya Sharma', '9876543210', '1955-08-15', 'Female', 'Widowed',
- NULL, NULL, 'Sonari Gaon', 'Sonari', '123456789012', 'SBIN0001234',
- 'uploads/sample1.pdf', 'PENDING', NOW() - INTERVAL '20 days'),
+)
+SELECT 'APP-2026-00001', 'Ananya Sharma', '9876543210', '1955-08-15', 'Female', 'Widowed',
+       NULL, NULL, 'Sonari Gaon', 'Sonari', '123456789012', 'SBIN0001234',
+       'uploads/sample1.pdf', 'PENDING', NOW() - INTERVAL '20 days'
+WHERE NOT EXISTS (SELECT 1 FROM applications WHERE application_no = 'APP-2026-00001');
 
 -- 2. Ineligible pending applicant (age 55, submitted 20 days ago, underage -> deemed approval must skip)
-('APP-2026-00002', 'Bikash Das', '9876543211', '1970-05-05', 'Male', 'Married',
- NULL, NULL, 'Borgaon Cent', 'Borgaon', '234567890123', 'SBIN0001234',
- 'uploads/sample2.pdf', 'PENDING', NOW() - INTERVAL '20 days'),
+INSERT INTO applications (
+    application_no, applicant_name, mobile, dob, gender, marital_status,
+    husband_name, husband_employer, village, block, bank_account, ifsc,
+    doc_path, status, submitted_at
+)
+SELECT 'APP-2026-00002', 'Bikash Das', '9876543211', '1970-05-05', 'Male', 'Married',
+       NULL, NULL, 'Borgaon Cent', 'Borgaon', '234567890123', 'SBIN0001234',
+       'uploads/sample2.pdf', 'PENDING', NOW() - INTERVAL '20 days'
+WHERE NOT EXISTS (SELECT 1 FROM applications WHERE application_no = 'APP-2026-00002');
 
 -- 3. Recent pending applicant (age 66, submitted 2 days ago, within 15-day SLA -> deemed approval must skip)
-('APP-2026-00003', 'Chitra Baruah', '9876543212', '1960-01-01', 'Female', 'Married',
- 'Pranab Baruah', 'Self Employed', 'Namti Ali', 'Namti', '345678901234', 'SBIN0001234',
- 'uploads/sample3.pdf', 'PENDING', NOW() - INTERVAL '2 days'),
+INSERT INTO applications (
+    application_no, applicant_name, mobile, dob, gender, marital_status,
+    husband_name, husband_employer, village, block, bank_account, ifsc,
+    doc_path, status, submitted_at
+)
+SELECT 'APP-2026-00003', 'Chitra Baruah', '9876543212', '1960-01-01', 'Female', 'Married',
+       'Pranab Baruah', 'Self Employed', 'Namti Ali', 'Namti', '345678901234', 'SBIN0001234',
+       'uploads/sample3.pdf', 'PENDING', NOW() - INTERVAL '2 days'
+WHERE NOT EXISTS (SELECT 1 FROM applications WHERE application_no = 'APP-2026-00003');
 
 -- 4. Approved applicant with Assamese Unicode name (tests Indic font PDF generation)
-('APP-2026-00004', 'অনন্যা শৰ্মা', '9876543213', '1962-10-10', 'Female', 'Widowed',
- NULL, NULL, 'Khelua Habi', 'Khelua', '456789012345', 'SBIN0001234',
- 'uploads/sample4.pdf', 'APPROVED', NOW() - INTERVAL '30 days');
+INSERT INTO applications (
+    application_no, applicant_name, mobile, dob, gender, marital_status,
+    husband_name, husband_employer, village, block, bank_account, ifsc,
+    doc_path, status, submitted_at
+)
+SELECT 'APP-2026-00004', 'অনন্যা শৰ্মা', '9876543213', '1962-10-10', 'Female', 'Widowed',
+       NULL, NULL, 'Khelua Habi', 'Khelua', '456789012345', 'SBIN0001234',
+       'uploads/sample4.pdf', 'APPROVED', NOW() - INTERVAL '30 days'
+WHERE NOT EXISTS (SELECT 1 FROM applications WHERE application_no = 'APP-2026-00004');
 
 -- Portal user accounts matching synthetic applications (password = DOB in DDMMYYYY format)
 INSERT INTO portal_users (mobile, password_hash) VALUES

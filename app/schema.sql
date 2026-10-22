@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS applications (
     id              SERIAL PRIMARY KEY,
-    application_no  VARCHAR(20),
+    application_no  VARCHAR(20) UNIQUE,
     applicant_name  VARCHAR(100),
     mobile          VARCHAR(15),
     dob             DATE,
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS applications (
     decided_at      TIMESTAMP,
     decided_by      VARCHAR(50)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no);
 
 -- Status portal accounts (created at submission time)
 CREATE TABLE IF NOT EXISTS portal_users (

@@ -57,16 +57,32 @@ def init_database(conn=None):
             with open(schema_path, "r", encoding="utf-8") as f:
                 cur.execute(f.read())
 
-        seed_path = os.path.join(ROOT_DIR, "seed", "synthetic_seed.sql")
-        if not os.path.exists(seed_path):
-            seed_path = os.path.join(BASE_DIR, "synthetic_seed.sql")
-        if os.path.exists(seed_path):
-            with open(seed_path, "r", encoding="utf-8") as f:
-                cur.execute(f.read())
+        # Attempt to ensure uniqueness index safely on application_no
+        try:
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_app_no ON applications (application_no)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            cur = conn.cursor()
 
-        conn.commit()
+        # Check existing records before seeding
+        cur.execute("SELECT count(*) FROM applications")
+        existing_apps = cur.fetchone()[0]
+
+        # Only seed synthetic test data on fresh, empty databases
+        if existing_apps == 0:
+            seed_path = os.path.join(ROOT_DIR, "seed", "synthetic_seed.sql")
+            if not os.path.exists(seed_path):
+                seed_path = os.path.join(BASE_DIR, "synthetic_seed.sql")
+            if os.path.exists(seed_path):
+                with open(seed_path, "r", encoding="utf-8") as f:
+                    cur.execute(f.read())
+            conn.commit()
+            print("Database schema and synthetic seed data initialized successfully.")
+        else:
+            conn.commit()
+            print(f"Database schema initialized; retained existing {existing_apps} application record(s).")
         cur.close()
-        print("Database schema and synthetic seed data initialized successfully.")
     finally:
         if close_conn:
             conn.close()
