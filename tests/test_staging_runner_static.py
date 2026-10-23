@@ -1027,39 +1027,77 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
     def test_drill_runner_version_detection_pe_and_cli(self):
         """Verify accurate in-memory PE and CLI major version extraction from local client tools."""
         from migration.test_disaster_recovery_drill import get_tool_major_version
+        from unittest.mock import patch, MagicMock
 
-        # Test local scratch binaries (v15.8)
-        dump_ver = get_tool_major_version("scratch/pgsql/bin/pg_dump.exe")
-        restore_ver = get_tool_major_version("scratch/pgsql/bin/pg_restore.exe")
-        psql_ver = get_tool_major_version("scratch/pgsql/bin/psql.exe")
+        # 1. On Windows with local scratch tools present, verify PE header version extraction:
+        if sys.platform.startswith("win") and os.path.isfile("scratch/pgsql/bin/pg_dump.exe"):
+            dump_ver = get_tool_major_version("scratch/pgsql/bin/pg_dump.exe")
+            restore_ver = get_tool_major_version("scratch/pgsql/bin/pg_restore.exe")
+            psql_ver = get_tool_major_version("scratch/pgsql/bin/psql.exe")
 
-        self.assertEqual(dump_ver, 15, "scratch/pgsql/bin/pg_dump.exe must report major version 15")
-        self.assertEqual(restore_ver, 15, "scratch/pgsql/bin/pg_restore.exe must report major version 15")
-        self.assertEqual(psql_ver, 15, "scratch/pgsql/bin/psql.exe must report major version 15")
+            self.assertEqual(dump_ver, 15, "scratch/pgsql/bin/pg_dump.exe must report major version 15")
+            self.assertEqual(restore_ver, 15, "scratch/pgsql/bin/pg_restore.exe must report major version 15")
+            self.assertEqual(psql_ver, 15, "scratch/pgsql/bin/psql.exe must report major version 15")
+
+        # 2. Test CLI '--version' output extraction (cross-platform fixture):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="pg_dump (PostgreSQL) 18.1 (Debian 18.1-1.pgdg120+1)\n", stderr="", returncode=0)
+            ver18 = get_tool_major_version("/mock/path/pg_dump")
+            self.assertEqual(ver18, 18, "CLI output must correctly extract major version 18")
+
+            mock_run.return_value = MagicMock(stdout="pg_dump (PostgreSQL) 15.8\n", stderr="", returncode=0)
+            ver15 = get_tool_major_version("/mock/path/pg_dump")
+            self.assertEqual(ver15, 15, "CLI output must correctly extract major version 15")
 
         # Nonexistent tool returns None
-        self.assertIsNone(get_tool_major_version("scratch/pgsql/bin/nonexistent.exe"))
+        self.assertIsNone(get_tool_major_version("scratch/pgsql/bin/nonexistent_tool_xyz.exe"))
 
     def test_drill_runner_incompatible_version_rejected_safely(self):
-        """Verify finding only v15.8 client against PostgreSQL 18.6 staging server safely raises IncompatibleToolError."""
+        """Verify finding an incompatible v15 client against PostgreSQL 18.6 staging server safely raises IncompatibleToolError."""
         from migration.test_disaster_recovery_drill import (
             find_postgres_tool,
             IncompatibleToolError,
             REQUIRED_STAGING_PG_MAJOR,
         )
+        from unittest.mock import patch
 
         self.assertEqual(REQUIRED_STAGING_PG_MAJOR, 18)
 
-        # On this environment, scratch/pgsql/bin has v15.8.
-        # Calling find_postgres_tool with required_major=18 must raise IncompatibleToolError.
-        with self.assertRaises(IncompatibleToolError) as ctx:
-            find_postgres_tool("pg_dump", required_major=18)
+        # 1. Cross-platform isolated test:
+        # Verify tool discovery checks the executable's ACTUAL version, not just directory name,
+        # and rejects an incompatible version 15 client even if located in a path labeled '18'.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mock_exe_name = "pg_dump.exe" if sys.platform.startswith("win") else "pg_dump"
+            mock_tool_path = os.path.join(temp_dir, mock_exe_name)
+            with open(mock_tool_path, "wb") as f:
+                f.write(b"MOCK_PG15_TOOL")
+            if not sys.platform.startswith("win"):
+                os.chmod(mock_tool_path, 0o755)
 
-        err_msg = str(ctx.exception)
-        self.assertIn("Incompatible PostgreSQL tool 'pg_dump'", err_msg)
-        self.assertIn("found version 15", err_msg)
-        self.assertIn("PostgreSQL 18.6", err_msg)
-        self.assertIn("cannot dump from a server with a newer major version", err_msg)
+            with patch("migration.test_disaster_recovery_drill.get_tool_major_version") as mock_ver:
+                # Actual executable reports version 15
+                mock_ver.return_value = 15
+
+                os.environ["PG18_BIN_DIR"] = temp_dir
+                try:
+                    with self.assertRaises(IncompatibleToolError) as ctx:
+                        find_postgres_tool("pg_dump", required_major=18)
+
+                    err_msg = str(ctx.exception)
+                    self.assertIn("Incompatible PostgreSQL tool 'pg_dump'", err_msg)
+                    self.assertIn("found version 15", err_msg)
+                    self.assertIn("PostgreSQL 18.6", err_msg)
+                    self.assertIn("cannot dump from a server with a newer major version", err_msg)
+                finally:
+                    os.environ.pop("PG18_BIN_DIR", None)
+
+        # 2. On Windows workstation without PG18 installed, verify real scratch/pgsql/bin is rejected:
+        if sys.platform.startswith("win") and os.path.isfile("scratch/pgsql/bin/pg_dump.exe") and "PG18_BIN_DIR" not in os.environ:
+            with self.assertRaises(IncompatibleToolError) as ctx:
+                find_postgres_tool("pg_dump", required_major=18)
+            err_msg = str(ctx.exception)
+            self.assertIn("Incompatible PostgreSQL tool 'pg_dump'", err_msg)
+            self.assertIn("found version 15", err_msg)
 
     def test_drill_runner_prefers_pg18_when_available(self):
         """Verify discovery prefers PostgreSQL 18 client when PG18_BIN_DIR override is provided."""
@@ -1075,7 +1113,6 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
 
             if sys.platform.startswith("win"):
                 # On Windows, create a batch script or executable wrapper
-                # In Python, we can write a tiny batch file or test with mock version
                 mock_cmd = f'@echo off\r\necho pg_dump (PostgreSQL) 18.1\r\n'
                 mock_bat = os.path.join(temp_dir, "pg_dump.bat")
                 with open(mock_bat, "w") as f:
@@ -1094,6 +1131,8 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
                 # Create mock file in temp_dir
                 with open(mock_tool_path, "wb") as f:
                     f.write(b"MOCK_PG_18_BIN")
+                if not sys.platform.startswith("win"):
+                    os.chmod(mock_tool_path, 0o755)
 
                 # Point PG18_BIN_DIR to temp_dir
                 os.environ["PG18_BIN_DIR"] = temp_dir

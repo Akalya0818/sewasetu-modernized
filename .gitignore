@@ -1,9 +1,10 @@
 # Production citizen data & database dumps (strictly exclude real citizen data)
-seed/seed.sql
 *.sql
 !app/schema.sql
 !seed/synthetic_seed.sql
 !app/synthetic_seed.sql
+!seed/seed.sql
+!migration/*.sql
 
 # Submission zip archives
 *.zip
