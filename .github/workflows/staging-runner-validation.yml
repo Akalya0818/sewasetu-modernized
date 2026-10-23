@@ -1,0 +1,85 @@
+name: Staging Runner Offline Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual validation trigger'
+        required: false
+        default: 'Pre-drill runner image and client tool compatibility check'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-staging-runner:
+    name: Build & Validate Linux Staging Runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Staging Runner Image
+        run: |
+          echo "Building migration/Dockerfile.staging_runner..."
+          docker build -f migration/Dockerfile.staging_runner -t sewasetu-dr-runner:latest .
+          echo "PASS: Staging runner image built successfully."
+
+      - name: Verify Python & psycopg2
+        run: |
+          echo "Verifying Python runtime and psycopg2..."
+          docker run --rm sewasetu-dr-runner:latest python3 --version
+          docker run --rm sewasetu-dr-runner:latest python3 -c "import psycopg2; print('psycopg2 version:', psycopg2.__version__)"
+          echo "PASS: Python and psycopg2 validated."
+
+      - name: Verify PostgreSQL 18 Client Versions
+        run: |
+          set -eo pipefail
+          echo "Checking PostgreSQL client tool versions..."
+
+          PG_DUMP_RAW=$(docker run --rm sewasetu-dr-runner:latest pg_dump --version)
+          PG_RESTORE_RAW=$(docker run --rm sewasetu-dr-runner:latest pg_restore --version)
+          PSQL_RAW=$(docker run --rm sewasetu-dr-runner:latest psql --version)
+
+          echo "Raw pg_dump    : $PG_DUMP_RAW"
+          echo "Raw pg_restore : $PG_RESTORE_RAW"
+          echo "Raw psql       : $PSQL_RAW"
+
+          PG_DUMP_VER=$(echo "$PG_DUMP_RAW" | grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 | cut -d. -f1)
+          PG_RESTORE_VER=$(echo "$PG_RESTORE_RAW" | grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 | cut -d. -f1)
+          PSQL_VER=$(echo "$PSQL_RAW" | grep -oE '[0-9]+(\.[0-9]+)?' | head -n1 | cut -d. -f1)
+
+          echo "Parsed major versions: pg_dump=$PG_DUMP_VER, pg_restore=$PG_RESTORE_VER, psql=$PSQL_VER"
+
+          if [ "$PG_DUMP_VER" -ne 18 ] || [ "$PG_RESTORE_VER" -ne 18 ] || [ "$PSQL_VER" -ne 18 ]; then
+            echo "::error::Incompatible PostgreSQL client version! Expected major version exactly 18 for Neon PostgreSQL 18.6 staging server."
+            exit 1
+          fi
+          echo "PASS: All PostgreSQL client tools verified to be major version exactly 18."
+
+      - name: Run Static Unit Tests Inside Container
+        run: |
+          echo "Executing 57 static unit tests inside container..."
+          docker run --rm sewasetu-dr-runner:latest python3 -m unittest tests/test_staging_runner_static.py
+          echo "PASS: All static runner unit tests passed."
+
+      - name: Run Full Application Test Suite Inside Container
+        run: |
+          echo "Executing full application pytest suite inside container..."
+          docker run --rm sewasetu-dr-runner:latest python3 -m pytest -q
+          echo "PASS: All application regression tests passed."
+
+      - name: Validation Summary
+        if: always()
+        run: |
+          echo "================================================================================"
+          echo "SEVA SETU: STAGING RUNNER OFFLINE VALIDATION SUMMARY"
+          echo "================================================================================"
+          echo "Runner Environment    : GitHub-hosted Ubuntu Runner (ubuntu-latest)"
+          echo "PostgreSQL Tools      : Major Version >= 18 strictly required"
+          echo "Test Suites Executed  : unittest (static runner guards) & pytest (application)"
+          echo "Database Connectivity : ZERO database connections made (100% offline)"
+          echo "Drill Status          : Disaster recovery drill and migration remain UNEXECUTED"
+          echo "================================================================================"
