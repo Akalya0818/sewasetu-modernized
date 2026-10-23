@@ -1,0 +1,46 @@
+# ==============================================================================
+# Seva Setu: Isolated Disaster Recovery Staging Drill Runner Environment
+# ==============================================================================
+# Target Engine: Neon PostgreSQL 18.6
+# Purpose: Reproducible, isolated Linux environment with PostgreSQL 18 client tools
+#          and Python 3.11 with psycopg2 for executing the Scenario B drill.
+# ==============================================================================
+
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install prerequisites for official PGDG repository
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    netcat-traditional \
+    && install -d /etc/apt/keyrings \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg-testing main" >> /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Install project runtime dependencies and pytest for self-contained testing
+COPY app/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir \
+    -r /tmp/requirements.txt \
+    pytest==8.0.0 \
+    && rm -f /tmp/requirements.txt
+
+# Copy repository contents into the image for self-contained execution
+COPY . /workspace
+
+# Create non-root drill operator user with appropriate permissions
+RUN useradd -m -u 1000 drilluser && chown -R drilluser:drilluser /workspace /tmp
+USER drilluser
+
+# Default entrypoint runs runner in default refusal / planning mode unless authorized
+CMD ["python3", "migration/test_disaster_recovery_drill.py"]
