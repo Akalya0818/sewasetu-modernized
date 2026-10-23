@@ -28,12 +28,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace
 
-# Install project runtime dependencies and pytest for self-contained testing
+# Install project runtime and test dependencies for self-contained testing
 COPY app/requirements.txt /tmp/requirements.txt
+COPY requirements-test.txt /tmp/requirements-test.txt
 RUN pip install --no-cache-dir \
     -r /tmp/requirements.txt \
-    pytest==8.0.0 \
-    && rm -f /tmp/requirements.txt
+    -r /tmp/requirements-test.txt \
+    && rm -f /tmp/requirements.txt /tmp/requirements-test.txt
 
 # Copy repository contents into the image for self-contained execution
 COPY . /workspace

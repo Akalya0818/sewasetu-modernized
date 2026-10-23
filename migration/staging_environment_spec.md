@@ -57,7 +57,7 @@ sudo apt-get install -y --no-install-recommends postgresql-client-18
 python3 -m venv .venv-drill
 source .venv-drill/bin/activate
 pip install --upgrade pip
-pip install psycopg2-binary==2.9.9 pytest==8.0.0
+pip install psycopg2-binary==2.9.9 pytest==8.0.0 pypdf==5.1.0
 ```
 
 ---

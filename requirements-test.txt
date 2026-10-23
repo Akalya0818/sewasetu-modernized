@@ -1,0 +1,3 @@
+# Project Test & Development Dependencies
+pytest==8.0.0
+pypdf==5.1.0
