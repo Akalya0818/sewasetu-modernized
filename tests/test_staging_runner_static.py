@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import urllib.parse
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import psycopg2
 
 from migration.test_staging_migration import (
@@ -130,14 +130,15 @@ class TestStagingRunnerStatic(unittest.TestCase):
         with self.assertRaises(SystemExit):
             validate_target_host("postgresql://user:pass@ep-cool-branch-pooler.c-2.neon.tech/neondb", urllib.parse.urlparse("postgresql://user:pass@ep-cool-branch-pooler.c-2.neon.tech/neondb"))
 
-        # Reject unverified host
-        os.environ.pop("EXPECTED_STAGING_HOST", None)
-        with self.assertRaises(SystemExit):
-            validate_target_host("postgresql://user:pass@ep-unverified.neon.tech/neondb", urllib.parse.urlparse("postgresql://user:pass@ep-unverified.neon.tech/neondb"))
+        # Reject unverified host in isolated fixture (ensuring no allowlist matches)
+        with patch.dict(os.environ, {"EXPECTED_STAGING_HOST": "", "ALLOWED_STAGING_HOSTS": "", "ALLOW_LOCAL_STAGING": "0"}):
+            os.environ.pop("EXPECTED_STAGING_HOST", None)
+            with self.assertRaises(SystemExit):
+                validate_target_host("postgresql://user:pass@ep-unverified.neon.tech/neondb", urllib.parse.urlparse("postgresql://user:pass@ep-unverified.neon.tech/neondb"))
 
-        # Accept exact allowlisted host
-        os.environ["EXPECTED_STAGING_HOST"] = "ep-staging-branch.c-2.neon.tech"
-        self.assertTrue(validate_target_host("postgresql://user:pass@ep-staging-branch.c-2.neon.tech/neondb", urllib.parse.urlparse("postgresql://user:pass@ep-staging-branch.c-2.neon.tech/neondb")))
+        # Accept exact allowlisted host in isolated fixture
+        with patch.dict(os.environ, {"EXPECTED_STAGING_HOST": "ep-staging-branch.c-2.neon.tech", "ALLOWED_STAGING_HOSTS": "", "ALLOW_LOCAL_STAGING": "0"}):
+            self.assertTrue(validate_target_host("postgresql://user:pass@ep-staging-branch.c-2.neon.tech/neondb", urllib.parse.urlparse("postgresql://user:pass@ep-staging-branch.c-2.neon.tech/neondb")))
 
     def test_step2_simulation_sql_uniqueness(self):
         """Verify that Step 2 simulation SQL does not insert duplicate application numbers violating schema.sql."""
@@ -938,22 +939,24 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
             validate_drill_target_host(pooler_url, urllib.parse.urlparse(pooler_url))
         self.assertIn("REJECTED POOLED ENDPOINT", str(ctx.exception))
 
-        # Unverified staging host
-        os.environ.pop("EXPECTED_STAGING_HOST", None)
-        unverified_url = "postgresql://user:pass@ep-staging-branch.c-2.neon.tech/neondb"
-        with self.assertRaises(ValueError) as ctx:
-            validate_drill_target_host(unverified_url, urllib.parse.urlparse(unverified_url))
-        self.assertIn("TARGET HOST UNVERIFIED", str(ctx.exception))
+        # Unverified staging host in isolated fixture
+        unverified_url = "postgresql://user:pass@ep-unverified.neon.tech/neondb"
+        with patch.dict(os.environ, {"EXPECTED_STAGING_HOST": ""}):
+            os.environ.pop("EXPECTED_STAGING_HOST", None)
+            with self.assertRaises(ValueError) as ctx:
+                validate_drill_target_host(unverified_url, urllib.parse.urlparse(unverified_url))
+            self.assertIn("TARGET HOST UNVERIFIED", str(ctx.exception))
+            self.assertIn("ep-unverified.neon.tech", str(ctx.exception))
 
-        # Host mismatch
-        os.environ["EXPECTED_STAGING_HOST"] = "ep-staging-expected.c-2.neon.tech"
-        with self.assertRaises(ValueError) as ctx:
-            validate_drill_target_host(unverified_url, urllib.parse.urlparse(unverified_url))
-        self.assertIn("TARGET HOST MISMATCH", str(ctx.exception))
+        # Host mismatch in isolated fixture
+        with patch.dict(os.environ, {"EXPECTED_STAGING_HOST": "ep-staging-expected.c-2.neon.tech"}):
+            with self.assertRaises(ValueError) as ctx:
+                validate_drill_target_host(unverified_url, urllib.parse.urlparse(unverified_url))
+            self.assertIn("TARGET HOST MISMATCH", str(ctx.exception))
 
-        # Exact allowlisted host passes
-        valid_url = "postgresql://user:pass@ep-staging-expected.c-2.neon.tech/neondb"
-        self.assertTrue(validate_drill_target_host(valid_url, urllib.parse.urlparse(valid_url)))
+            # Exact allowlisted host passes
+            valid_url = "postgresql://user:pass@ep-staging-expected.c-2.neon.tech/neondb"
+            self.assertTrue(validate_drill_target_host(valid_url, urllib.parse.urlparse(valid_url)))
 
     def test_drill_runner_wrong_database_rejection(self):
         """Verify drill runner strictly rejects neondb, postgres, shared DBs, and prod DBs."""
