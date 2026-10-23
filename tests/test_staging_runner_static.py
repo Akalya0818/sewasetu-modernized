@@ -673,6 +673,16 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
             main,
         )
 
+        seed_fixture = os.path.join("tests", "fixtures", "synthetic_seed.sql")
+        if not os.path.exists(seed_fixture):
+            os.makedirs(os.path.dirname(seed_fixture), exist_ok=True)
+            with open(seed_fixture, "w", encoding="utf-8") as f:
+                f.write(
+                    "COPY applications (id, application_no, applicant_name) FROM stdin;\n"
+                    "1\tSSP25825708\tSynthetic Seed Citizen\n"
+                    "\\.\n"
+                )
+
         fixture_path = os.path.join("tests", "fixtures", "live_db_keys_no_collision.csv")
         self.assertTrue(os.path.exists(fixture_path), f"Fixture missing: {fixture_path}")
 
@@ -681,18 +691,28 @@ class TestPreMigrationCollisionCheck(unittest.TestCase):
         self.assertIn("SSP26999905", keys)
         self.assertIn("APP-2026-00001", keys)
 
-        # Test CLI main() with fixture
-        rc = main(["--seed-file", "seed/seed.sql", "--offline-db-keys-file", fixture_path])
+        # Test CLI main() with dedicated synthetic fixtures
+        rc = main(["--seed-file", seed_fixture, "--offline-db-keys-file", fixture_path])
         self.assertEqual(rc, 0, "Dedicated non-colliding fixture must pass with exit code 0")
 
     def test_collision_check_dedicated_fixture_deliberate_collision(self):
         """Verify dedicated fixture with colliding key (SSP25825708) fails safely with exit code 1."""
         from migration.pre_migration_collision_check import main
 
+        seed_fixture = os.path.join("tests", "fixtures", "synthetic_seed.sql")
+        if not os.path.exists(seed_fixture):
+            os.makedirs(os.path.dirname(seed_fixture), exist_ok=True)
+            with open(seed_fixture, "w", encoding="utf-8") as f:
+                f.write(
+                    "COPY applications (id, application_no, applicant_name) FROM stdin;\n"
+                    "1\tSSP25825708\tSynthetic Seed Citizen\n"
+                    "\\.\n"
+                )
+
         fixture_path = os.path.join("tests", "fixtures", "live_db_keys_with_collision.csv")
         self.assertTrue(os.path.exists(fixture_path), f"Fixture missing: {fixture_path}")
 
-        rc = main(["--seed-file", "seed/seed.sql", "--offline-db-keys-file", fixture_path])
+        rc = main(["--seed-file", seed_fixture, "--offline-db-keys-file", fixture_path])
         self.assertEqual(rc, 1, "Dedicated colliding fixture must fail with exit code 1")
 
     def test_collision_check_malformed_input_fails_safely(self):

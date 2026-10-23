@@ -5,6 +5,7 @@
 !app/synthetic_seed.sql
 !seed/seed.sql
 !migration/*.sql
+!tests/fixtures/*.sql
 
 # Submission zip archives
 *.zip
